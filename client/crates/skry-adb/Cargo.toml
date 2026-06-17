@@ -1,0 +1,14 @@
+[package]
+name = "skry-adb"
+version = "0.1.0"
+description = "Wrapper tipado sobre el binario adb: descubrimiento de dispositivos, túnel y despliegue"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
