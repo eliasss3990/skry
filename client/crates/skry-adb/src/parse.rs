@@ -4,18 +4,20 @@
 //! 100% testeables sin un dispositivo ni el binario adb conectados, que es donde
 //! vive la lógica de resiliencia de los casos de conexión física.
 
-use crate::error::AdbError;
+use crate::error::{AdbError, Result};
 use crate::model::{Device, DeviceState};
 
 /// Parsea la salida de `adb devices -l`.
 ///
-/// Ignora la línea de encabezado y las vacías. Cada línea de dispositivo es
+/// Ignora el encabezado, las vacías y las líneas de estado del daemon (que adb
+/// emite a stdout en frío, p. ej. `* daemon started successfully *`) para no
+/// inyectar dispositivos fantasma. Cada línea de dispositivo es
 /// `serial  estado  key:value...`; se extrae `model:` si está presente.
 pub fn parse_devices(output: &str) -> Vec<Device> {
     output
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && *l != "List of devices attached")
+        .filter(|l| !l.is_empty() && *l != "List of devices attached" && !l.starts_with('*'))
         .filter_map(parse_device_line)
         .collect()
 }
@@ -23,8 +25,11 @@ pub fn parse_devices(output: &str) -> Vec<Device> {
 fn parse_device_line(line: &str) -> Option<Device> {
     let mut parts = line.split_whitespace();
     let serial = parts.next()?.to_string();
-    let state = DeviceState::parse(parts.next()?);
-    let model = parts
+    // El resto de la línea: estado (puede ser multi-palabra) + descriptores.
+    let rest: Vec<&str> = parts.collect();
+    let state = parse_state(&rest)?;
+    let model = rest
+        .iter()
         .find_map(|kv| kv.strip_prefix("model:"))
         .map(|m| m.replace('_', " "));
     let transport = Device::infer_transport(&serial);
@@ -36,11 +41,30 @@ fn parse_device_line(line: &str) -> Option<Device> {
     })
 }
 
+/// Determina el estado a partir de los tokens posteriores al serial. Maneja el
+/// estado multi-palabra `no permissions` (Linux sin udev); el resto es el
+/// primer token. Devuelve `None` si no hay token de estado (línea malformada).
+fn parse_state(rest: &[&str]) -> Option<DeviceState> {
+    match rest {
+        // adb imprime "no permissions; see [url]"; el 2º token trae el ';'.
+        [first, second, ..] if *first == "no" && second.starts_with("permissions") => {
+            Some(DeviceState::NoPermissions)
+        }
+        [first, ..] => Some(DeviceState::parse(first)),
+        [] => None,
+    }
+}
+
 /// Elige el dispositivo objetivo a partir de los conectados y un serial opcional.
 ///
 /// Concentra la resiliencia de conexión física: sin dispositivo, ambigüedad,
 /// no autorizado y estados no operables se mapean a su error accionable.
-pub fn select_device(devices: &[Device], desired_serial: Option<&str>) -> Result<Device, AdbError> {
+///
+/// El caso C del catálogo (no autorizado) se devuelve como
+/// [`AdbError::Unauthorized`] sin bloquear: el loop de espera de los ~10s
+/// pidiendo aceptar el diálogo es responsabilidad del orquestador (capa CLI),
+/// no de esta función pura.
+pub fn select_device(devices: &[Device], desired_serial: Option<&str>) -> Result<Device> {
     if let Some(serial) = desired_serial {
         return match devices.iter().find(|d| d.serial == serial) {
             None => Err(AdbError::SerialNotFound {
@@ -75,10 +99,13 @@ pub fn select_device(devices: &[Device], desired_serial: Option<&str>) -> Result
     }
 }
 
-fn ready_or_state_error(d: &Device) -> Result<Device, AdbError> {
+fn ready_or_state_error(d: &Device) -> Result<Device> {
     match &d.state {
         DeviceState::Device => Ok(d.clone()),
         DeviceState::Unauthorized | DeviceState::Authorizing => Err(AdbError::Unauthorized {
+            serial: d.serial.clone(),
+        }),
+        DeviceState::NoPermissions => Err(AdbError::NoPermissions {
             serial: d.serial.clone(),
         }),
         other => Err(AdbError::NotReady {
@@ -121,6 +148,42 @@ mod tests {
     #[test]
     fn empty_list_parses_to_nothing() {
         assert!(parse_devices("List of devices attached\n\n").is_empty());
+    }
+
+    #[test]
+    fn ignores_daemon_lines() {
+        // En frío, adb emite estas líneas a stdout: no deben volverse fantasmas.
+        let out = "* daemon not running; starting now at tcp:5037 *\n\
+            * daemon started successfully *\n\
+            List of devices attached\n\
+            R5CY139AG4E device transport_id:1\n";
+        let devs = parse_devices(out);
+        assert_eq!(devs.len(), 1);
+        assert_eq!(devs[0].serial, "R5CY139AG4E");
+    }
+
+    #[test]
+    fn parses_no_permissions_state() {
+        let out = "List of devices attached\n\
+            0123456789ABCDEF       no permissions; see [http://x]  usb:1-1\n";
+        let devs = parse_devices(out);
+        assert_eq!(devs.len(), 1);
+        assert_eq!(devs[0].state, DeviceState::NoPermissions);
+    }
+
+    #[test]
+    fn infers_mdns_wireless_as_wifi() {
+        let out = "List of devices attached\n\
+            adb-R5CY139AG4E-AbCdEf._adb-tls-connect._tcp device transport_id:1\n";
+        let devs = parse_devices(out);
+        assert_eq!(devs[0].transport, Transport::Wifi);
+    }
+
+    #[test]
+    fn infers_emulator_transport() {
+        let out = "List of devices attached\nemulator-5554 device transport_id:1\n";
+        let devs = parse_devices(out);
+        assert_eq!(devs[0].transport, Transport::Emulator);
     }
 
     #[test]

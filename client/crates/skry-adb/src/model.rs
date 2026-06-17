@@ -13,11 +13,15 @@ pub enum DeviceState {
     Offline,
     /// En proceso de autorización.
     Authorizing,
+    /// Sin permisos para acceder al USB (típico en Linux sin reglas udev).
+    NoPermissions,
     /// Otro estado reportado por adb (bootloader, recovery, etc.).
     Other(String),
 }
 
 impl DeviceState {
+    /// Parsea un único token de estado. Los estados multi-palabra
+    /// (`no permissions`) se detectan antes, en el parseo de la línea.
     pub fn parse(s: &str) -> DeviceState {
         match s {
             "device" => DeviceState::Device,
@@ -41,6 +45,7 @@ impl fmt::Display for DeviceState {
             DeviceState::Unauthorized => write!(f, "unauthorized"),
             DeviceState::Offline => write!(f, "offline"),
             DeviceState::Authorizing => write!(f, "authorizing"),
+            DeviceState::NoPermissions => write!(f, "no permissions"),
             DeviceState::Other(s) => write!(f, "{s}"),
         }
     }
@@ -51,8 +56,10 @@ impl fmt::Display for DeviceState {
 pub enum Transport {
     /// Conectado por cable (serial alfanumérico).
     Usb,
-    /// Conectado por red (el serial es `host:puerto`). Operación inalámbrica.
+    /// Conectado por red (`host:puerto` o serial mDNS). Operación inalámbrica.
     Wifi,
+    /// Emulador de Android (`emulator-NNNN`).
+    Emulator,
 }
 
 /// Un dispositivo visible por adb.
@@ -66,15 +73,21 @@ pub struct Device {
 }
 
 impl Device {
-    /// Infiere el transporte a partir del serial: los seriales de red tienen la
-    /// forma `host:puerto` (ADB sobre Wi-Fi), el resto son USB.
+    /// Infiere el transporte a partir del serial:
+    /// - `emulator-NNNN` → emulador.
+    /// - `host:puerto` o serial mDNS (`..._adb-tls-connect._tcp`) → Wi-Fi.
+    /// - el resto (alfanumérico) → USB.
     pub fn infer_transport(serial: &str) -> Transport {
-        // Un serial de red contiene ':' separando host y puerto. Los seriales
-        // USB son alfanuméricos sin ':'.
-        if serial
+        if serial.starts_with("emulator-") {
+            return Transport::Emulator;
+        }
+        // Wireless debugging (Android 11+) puede aparecer como serial mDNS, no
+        // sólo como host:puerto numérico.
+        let is_mdns = serial.contains("._adb-tls") || serial.ends_with("._tcp");
+        let is_host_port = serial
             .rsplit_once(':')
-            .is_some_and(|(_, port)| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
-        {
+            .is_some_and(|(_, port)| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()));
+        if is_mdns || is_host_port {
             Transport::Wifi
         } else {
             Transport::Usb
@@ -86,6 +99,7 @@ impl Device {
         let kind = match self.transport {
             Transport::Usb => "USB",
             Transport::Wifi => "Wi-Fi",
+            Transport::Emulator => "emulador",
         };
         match &self.model {
             Some(m) => format!("{} ({m}, {kind})", self.serial),

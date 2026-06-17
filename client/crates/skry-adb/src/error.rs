@@ -22,6 +22,8 @@ pub enum AdbError {
     },
     /// El dispositivo está conectado pero no autorizado (caso C).
     Unauthorized { serial: String },
+    /// Sin permisos de acceso al USB (Linux sin reglas udev).
+    NoPermissions { serial: String },
     /// El dispositivo está en un estado no operable (offline, etc.).
     NotReady { serial: String, state: String },
     /// Un comando adb terminó con código de error.
@@ -67,7 +69,11 @@ impl fmt::Display for AdbError {
             }
             AdbError::Unauthorized { serial } => write!(
                 f,
-                "dispositivo '{serial}' bloqueado (no autorizado).\n-> Solucion: mira la pantalla del celular y aceta el cartel 'Permitir depuracion USB'."
+                "dispositivo '{serial}' bloqueado (no autorizado).\n-> Solucion: mira la pantalla del celular y acepta el cartel 'Permitir depuracion USB'."
+            ),
+            AdbError::NoPermissions { serial } => write!(
+                f,
+                "sin permisos para acceder al dispositivo '{serial}' por USB.\n-> Solucion (Linux): instala las reglas udev de Android (paquete android-sdk-platform-tools-common) o agrega una regla para el vendor del dispositivo, despues 'adb kill-server' y reconecta."
             ),
             AdbError::NotReady { serial, state } => write!(
                 f,
