@@ -90,6 +90,30 @@ Corrida real en el S24 Ultra (`SM-S928B`), 2026-06-17. Hechos confirmados:
 Esto es el camino de arranque confirmado para el módulo `:app`; los demás quedan
 como fallbacks para versiones más viejas.
 
+### Soporte multi-dispositivo (requisito explícito)
+
+skry debe andar en **distintos teléfonos**, no solo en el de validación. Esto se
+logra, igual que scrcpy (un único jar para Android 5→16), por estas decisiones:
+
+- **Reflexión, no enlace en compilación**, para todo lo hidden: el comportamiento
+  se resuelve en runtime contra el framework del dispositivo. Compilar contra
+  `android.jar` de API 36 **no** ata el runtime a API 36.
+- `minSdk` bajo + uso directo sólo de APIs estables (`ImageReader`, `MediaCodec`,
+  `Surface`, `Bitmap`); cualquier API nueva se llama por reflexión con guarda por
+  `SDK_INT`.
+- **Capa `ScreenCapture` con selección por `Build.VERSION.SDK_INT`**, con una
+  implementación por familia de versiones:
+  - Android 15/16: `DisplayManager.createVirtualDisplay` estática (validado).
+  - Android ≤14: `SurfaceControl.createDisplay` (presente en esas versiones).
+  - `densityDpi` real del display (no 0 como en el spike).
+- **Enumeración de métodos ante `NoSuchMethodException`** para adaptarse a OEMs
+  que cambian firmas (prototipado en el Spike 1).
+- Matriz de referencia: el código known-good de scrcpy por versión.
+
+**Límite honesto**: la *validación* sólo es posible en los dispositivos físicos
+disponibles. El S24 Ultra (Android 16/One UI 8) cubre el caso más hostil; otras
+versiones se cubren por la matriz de scrcpy y se validan cuando haya hardware.
+
 > Riesgo alto (R1-R3 del pre-mortem): la captura es el corazón del server y el
 > único device de validación (Samsung + One UI + Android 14/15) es de los más
 > hostiles para esta técnica — scrcpy tiene issues **abiertos sin fix** en este
