@@ -131,6 +131,20 @@ mod tests {
     }
 
     #[test]
+    fn frame_reserved_flag_bits_ignored() {
+        // Bits 2-7 reservados: un frame que los trae seteados debe decodificar
+        // sin error, preservando keyframe/config de los bits 0-1.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&7u64.to_be_bytes()); // pts
+        buf.push(0xFD); // 1111_1101: keyframe=1, config=0, resto reservado
+        buf.extend_from_slice(&0u32.to_be_bytes()); // len
+        let h = FrameHeader::read(&mut &buf[..]).unwrap();
+        assert!(h.keyframe);
+        assert!(!h.config);
+        assert_eq!(h.len, 0);
+    }
+
+    #[test]
     fn frame_rejects_oversized_len() {
         // Cabecera con len por encima del máximo: debe rechazarse en lectura.
         let mut buf = Vec::new();

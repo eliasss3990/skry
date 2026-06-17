@@ -33,6 +33,38 @@ class WireTest {
     }
 
     @Test
+    fun handshakeRejectsVersionMismatch() {
+        // Espejo de handshake_rejects_version_mismatch (Rust).
+        val din = roundTrip { out ->
+            out.write(MAGIC)
+            Wire.writeU16(out, PROTOCOL_VERSION + 1)
+        }
+        assertFailsWith<ProtocolException> { Handshake.read(din) }
+    }
+
+    @Test
+    fun enumsRejectUnknownDiscriminant() {
+        assertFailsWith<ProtocolException> { Codec.fromU8(99) }
+        assertFailsWith<ProtocolException> { Gear.fromU8(99) }
+        assertFailsWith<ProtocolException> { StreamType.fromU8(99) }
+    }
+
+    @Test
+    fun frameReservedFlagBitsAreIgnored() {
+        // Bits 2-7 reservados: un frame que los trae seteados debe decodificar
+        // sin error, preservando keyframe/config de los bits 0-1.
+        val din = roundTrip { out ->
+            Wire.writeU64(out, 7)
+            Wire.writeU8(out, 0xFD) // 1111_1101: config(bit1)=0, keyframe(bit0)=1, resto reservado
+            Wire.writeU32(out, 0)
+        }
+        val h = FrameHeader.read(din)
+        assertTrue(h.keyframe)
+        assertTrue(!h.config)
+        assertEquals(0L, h.len)
+    }
+
+    @Test
     fun frameRoundTripAndFlags() {
         val h = FrameHeader(pts = 1_234_567, keyframe = true, config = false, len = 0)
         val back = FrameHeader.read(roundTrip { h.write(it) })

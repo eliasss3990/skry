@@ -1,0 +1,9 @@
+# Normalización de fin de línea, para que los scripts no se corrompan entre SO.
+* text=auto eol=lf
+
+# Lanzadores del Gradle Wrapper: el de Unix con LF, el de Windows con CRLF.
+gradlew      text eol=lf
+gradlew.bat  text eol=crlf
+
+# El jar del wrapper es binario (no tocar fin de línea).
+*.jar binary
