@@ -1,0 +1,35 @@
+# Rust
+/client/target/
+**/*.rs.bk
+*.pdb
+
+# Android / Gradle
+/server/.gradle/
+/server/build/
+/server/**/build/
+/server/local.properties
+/server/.idea/
+/server/captures/
+*.iml
+
+# Server jar embebido (se genera en build, no se versiona)
+/client/crates/skry/assets/skry-server.jar
+
+# Entornos y secretos
+.env
+.env.local
+
+# Artefactos de build / release
+/dist/
+/out/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Logs
+*.log
