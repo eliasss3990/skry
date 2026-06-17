@@ -4,8 +4,7 @@
 //! cada comando vaya con `-s <serial>` y no haya ambigüedad. La lógica pura de
 //! parseo y selección vive en [`crate::parse`] (testeable sin hardware).
 
-use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use crate::error::{AdbError, Result};
@@ -14,6 +13,29 @@ use crate::parse::{parse_devices, select_device};
 
 /// Variable de entorno para sobreescribir la ruta del binario adb.
 pub const ADB_ENV: &str = "SKRY_ADB";
+
+/// Corre `program <args>` y devuelve stdout si terminó OK. Mapea la ausencia del
+/// binario a [`AdbError::AdbNotFound`] y el resto a [`AdbError::CommandFailed`]
+/// con el comando completo para diagnóstico. Helper compartido por `Adb` y
+/// `Target` para no duplicar el manejo de proceso/errores.
+fn run_command(program: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => AdbError::AdbNotFound,
+            _ => AdbError::Io(e),
+        })?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(AdbError::CommandFailed {
+            args: args.iter().map(|s| s.to_string()).collect(),
+            code: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
 
 /// Handle del binario adb.
 #[derive(Debug, Clone)]
@@ -37,63 +59,39 @@ impl Adb {
     }
 
     /// Corre adb con los argumentos dados y devuelve stdout si terminó OK.
-    /// Mapea la ausencia del binario a [`AdbError::AdbNotFound`].
-    fn run<I, S>(&self, args: I) -> Result<String>
-    where
-        I: IntoIterator<Item = S> + Clone,
-        S: AsRef<OsStr>,
-    {
-        let output = Command::new(&self.program)
-            .args(args.clone())
-            .output()
-            .map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => AdbError::AdbNotFound,
-                _ => AdbError::Io(e),
-            })?;
-
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-        } else {
-            Err(AdbError::CommandFailed {
-                args: args
-                    .into_iter()
-                    .map(|s| s.as_ref().to_string_lossy().into_owned())
-                    .collect(),
-                code: output.status.code(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            })
-        }
+    fn run(&self, args: &[&str]) -> Result<String> {
+        run_command(&self.program, args)
     }
 
     /// Lista los dispositivos visibles (`adb devices -l`).
     pub fn devices(&self) -> Result<Vec<Device>> {
-        Ok(parse_devices(&self.run(["devices", "-l"])?))
+        Ok(parse_devices(&self.run(&["devices", "-l"])?))
     }
 
     /// Descubre dispositivos anunciados por mDNS (depuración inalámbrica).
     /// Útil para el flujo inalámbrico sin pedir IP al usuario.
     pub fn mdns_services(&self) -> Result<Vec<crate::wireless::MdnsService>> {
         Ok(crate::wireless::parse_mdns_services(
-            &self.run(["mdns", "services"])?,
+            &self.run(&["mdns", "services"])?,
         ))
     }
 
     /// Conecta por Wi-Fi a `host:puerto` (`adb connect`). adb suele devolver
     /// código 0 aunque falle, por eso se interpreta la salida de texto.
     pub fn connect(&self, host_port: &str) -> Result<()> {
-        crate::wireless::parse_connect_result(host_port, &self.run(["connect", host_port])?)
+        crate::wireless::parse_connect_result(host_port, &self.run(&["connect", host_port])?)
     }
 
     /// Desconecta un endpoint de red (`adb disconnect`).
     pub fn disconnect(&self, host_port: &str) -> Result<()> {
-        self.run(["disconnect", host_port])?;
+        self.run(&["disconnect", host_port])?;
         Ok(())
     }
 
     /// Empareja por código con `host:puerto` (`adb pair`). El emparejamiento
     /// requiere que el usuario lea el código en el teléfono (Android lo exige).
     pub fn pair(&self, host_port: &str, code: &str) -> Result<()> {
-        crate::wireless::parse_pair_result(host_port, &self.run(["pair", host_port, code])?)
+        crate::wireless::parse_pair_result(host_port, &self.run(&["pair", host_port, code])?)
     }
 
     /// Resuelve el dispositivo objetivo aplicando la resiliencia de selección.
@@ -134,21 +132,9 @@ impl Target {
     /// Corre `adb -s <serial> <args>` y devuelve stdout si terminó OK. El error
     /// incluye el comando completo (con `-s <serial>`) para diagnóstico real.
     fn run_args(&self, args: &[&str]) -> Result<String> {
-        let output = self.command(args).output().map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => AdbError::AdbNotFound,
-            _ => AdbError::Io(e),
-        })?;
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-        } else {
-            let mut full = vec!["-s", self.device.serial.as_str()];
-            full.extend_from_slice(args);
-            Err(AdbError::CommandFailed {
-                args: full.iter().map(|s| s.to_string()).collect(),
-                code: output.status.code(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            })
-        }
+        let mut full = vec!["-s", self.device.serial.as_str()];
+        full.extend_from_slice(args);
+        run_command(&self.program, &full)
     }
 
     /// Empuja un archivo local al dispositivo (`adb push`).
@@ -240,9 +226,13 @@ mod tests {
     /// Crea un stub ejecutable que imita a adb y devuelve un `Target` que lo usa.
     fn stub_target(script: &str, name: &str) -> Target {
         let path = std::env::temp_dir().join(format!("skry-adb-stub-{name}"));
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(script.as_bytes()).unwrap();
-        f.sync_all().unwrap();
+        // Escribir y CERRAR el archivo antes de ejecutarlo: si el handle de
+        // escritura sigue abierto, exec falla con ETXTBSY (test flaky).
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(script.as_bytes()).unwrap();
+            f.sync_all().unwrap();
+        }
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         Target {
             program: path,
