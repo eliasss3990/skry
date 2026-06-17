@@ -44,21 +44,56 @@ docker build -f build/release.Dockerfile --target export --output type=local,des
 
 ### Binario de Windows
 
-No se cross-compila desde Linux (FFmpeg/SDL2 nativas lo hacen frágil). El binario
-de Windows se produce en CI sobre un runner `windows-latest`. Para buildear
-localmente en Windows, instalar Rust 1.83 y las libs nativas con vcpkg (ver
-`.github/workflows/`).
+No se cross-compila desde Linux (FFmpeg/SDL2 nativas lo hacen frágil): se compila
+nativo en CI sobre `windows-latest` con FFmpeg vía vcpkg y SDL2 bundled. El plan
+concreto (triplet, vcpkg.json, env del job, alineación de versiones de FFmpeg
+entre Linux y Windows) está en
+[ADR-0007](decisions/0007-build-windows-vcpkg.md). Pendiente de implementar con
+validación para no romper el build Linux.
 
-## Server (Android, Kotlin)
+## Server (Android)
 
-Documentado junto al código del server en `server/` cuando esté disponible
-(imagen de build propia con Android SDK + Gradle).
+Dos partes:
+
+- **`server/protocol`** (Kotlin/JVM puro, sin Android SDK): el wire del protocolo.
+  Se compila/testea con el wrapper de Gradle:
+  ```bash
+  cd server && ./gradlew :protocol:test
+  ```
+- **`server/spike`** (Java, spikes de validación corridos en device): se compila
+  y dexea en un `.jar` con la imagen del SDK de Android (`build/android.Dockerfile`,
+  no-root) y `server/spike/build-spike.sh`:
+  ```bash
+  docker build -t skry-build-android:local -f build/android.Dockerfile .
+  docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work \
+      skry-build-android:local bash server/spike/build-spike.sh
+  # -> dist/skry-spike.jar
+  ```
+
+El módulo `:app` productivo (que reemplaza los spikes, con la capa
+`ScreenCapture` por `SDK_INT`) está pendiente.
+
+### Ver el video de forma provisoria (sin el cliente final)
+
+El binario `transport-spike` (cliente Rust de validación) puede pipear el stream
+crudo a `ffplay` para ver el teléfono en vivo mientras no esté el render propio:
+
+```cmd
+transport-spike.exe --pipe | ffplay -fflags nobuffer -flags low_delay -framerate 120 -f hevc -i -
+```
+
+(Limitación: ffplay no usa el `pts`, así que el ritmo no es exacto. El cliente
+`skry` —FFmpeg/SDL2— lo resuelve presentando por `pts`.)
 
 ## CI
 
 `.github/workflows/ci.yml` corre, en cada push y PR:
 
-- **Linux**: dentro de la misma imagen Docker (`build/client.Dockerfile`) →
-  paridad exacta con el desarrollo local. Formato + clippy + tests.
-- **Windows**: build nativo de los crates sin dependencias nativas (se expande a
-  medida que se integran FFmpeg/SDL2 vía vcpkg).
+- **Cliente Linux**: dentro de la imagen Docker (`build/client.Dockerfile`, con
+  FFmpeg/SDL2) → paridad exacta con local. Formato + clippy + tests de todo el
+  workspace (incluye `skry` y `skry-video`).
+- **Cliente Windows**: build nativo de los crates sin deps nativas
+  (`skry-proto`, `skry-adb`, `transport-spike`). El build de `skry`/`skry-video`
+  con FFmpeg/SDL2 vía vcpkg es lo que falta (ADR-0007).
+- **Server protocolo (Kotlin/JVM)**: `./gradlew :protocol:test` en la imagen de
+  gradle pineada por digest.
