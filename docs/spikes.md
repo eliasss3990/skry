@@ -13,6 +13,20 @@ una incógnita sin arrastrar las de los siguientes. Referencia: ADR-0002.
 > Descubrir un problema de captura después de armar todo el pipeline cuesta días;
 > descubrirlo con un PNG cuesta minutos.
 
+## Dispositivo de validación (confirmado)
+
+Samsung Galaxy S24 Ultra `SM-S928B`, serial `R5CY139AG4E`:
+
+- **Android 16** (`ro.build.version.release=16`), **API 36** (`sdk=36`).
+- **One UI 8** (`ro.build.version.oneui=80500`).
+- `adb shell id` → `uid=2000(shell)` ✓ (base para `app_process`).
+
+Es más nuevo que lo que asumía el pre-mortem (14/15): es el extremo bleeding-edge.
+`SurfaceControl.createDisplay` está removido con seguridad; las firmas internas
+pueden haber cambiado en 16/One UI 8. El camino de captura apunta a API 36 con
+`DisplayManager.createVirtualDisplay` por reflexión + enumeración de métodos ante
+fallo.
+
 ## Pre-flight del dispositivo (5 min)
 
 Antes de cualquier spike, en el S24 (por **USB**, no Wi-Fi todavía — ver R4):
@@ -29,7 +43,13 @@ Antes de cualquier spike, en el S24 (por **USB**, no Wi-Fi todavía — ver R4):
   adb shell getprop ro.build.version.oneui      # One UI 6 vs 7
   ```
 
-## Spike 1 — Captura saca 1 frame a PNG (el más importante)
+## Spike 1 — Captura saca 1 frame a PNG (el más importante) — ✅ PASÓ
+
+**Resultado (2026-06-17, S24 Ultra Android 16/One UI 8)**: PASÓ. El frame PNG
+(~3 MB) muestra la pantalla real del teléfono, confirmado visualmente. Captura
+vía `DisplayManager.createVirtualDisplay` estática (espejo por default), sin
+`Workarounds`, como uid shell. Riesgos R1/R2/R3/R7 despejados en device. Detalle
+del camino confirmado en ADR-0002.
 
 **Objetivo**: confirmar que el display produce píxeles. Sin MediaCodec, sin red,
 sin Rust. Aísla "¿la captura funciona?" de todo lo demás.
