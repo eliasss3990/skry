@@ -40,6 +40,8 @@ cd C:\skry\client
 $env:VCPKG_ROOT = "C:\vcpkg"
 $env:VCPKGRS_TRIPLET = "x64-windows-static-md"
 $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
+# CMake 4.x quitó la compatibilidad con minimums < 3.5; el SDL2 bundled lo pide.
+$env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 
 cargo build --release -p skry
 ```

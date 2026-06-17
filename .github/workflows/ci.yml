@@ -94,6 +94,10 @@ jobs:
           VCPKG_ROOT: C:\vcpkg
           VCPKGRS_TRIPLET: x64-windows-static-md
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
+          # CMake 4.x removió la compatibilidad con minimums < 3.5; el SDL2 que
+          # compila sdl2-sys (bundled) pide uno viejo. Esto le dice a CMake que
+          # lo tolere.
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --release -p skry
 
       - name: Subir el binario
