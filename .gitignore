@@ -6,6 +6,7 @@
 
 # Android / Gradle
 /server/.gradle/
+/server/.gradle-home/
 /server/build/
 /server/**/build/
 /server/local.properties

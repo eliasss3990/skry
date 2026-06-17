@@ -58,3 +58,20 @@ jobs:
 
       - name: Tests (crates sin deps nativas)
         run: cargo test -p skry-proto -p skry-adb
+
+  # Módulo Kotlin/JVM del server (protocolo). No necesita Android SDK; corre en
+  # la imagen de gradle como usuario no-root. Valida la paridad del wire con Rust.
+  server-protocol:
+    name: Server protocolo (Kotlin/JVM)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests del modulo protocol
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e GRADLE_USER_HOME=/work/.gradle-home \
+            -v "$PWD":/work -w /work gradle:8.7-jdk21 \
+            ./gradlew :protocol:test --no-daemon
