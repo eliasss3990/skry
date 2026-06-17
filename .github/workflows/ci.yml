@@ -59,6 +59,50 @@ jobs:
       - name: Tests (crates sin deps nativas)
         run: cargo test -p skry-proto -p skry-adb -p transport-spike
 
+  # Binario de Windows del cliente `skry` (con FFmpeg vía vcpkg + SDL2 bundled).
+  # Sube el .exe como artefacto descargable. continue-on-error mientras se
+  # estabiliza el build nativo (no validable desde Linux); se quita al quedar verde.
+  windows-bin:
+    name: Binario Windows (skry)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain Rust
+        uses: dtolnay/rust-toolchain@1.83.0
+
+      - name: Cache de vcpkg (FFmpeg)
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-ffmpeg-static-md-${{ hashFiles('client/vcpkg.json') }}
+
+      # Modo clásico (desde la raíz, sin vcpkg.json en el cwd): instala en
+      # C:\vcpkg\installed, donde la crate vcpkg de ffmpeg-sys lo descubre.
+      - name: FFmpeg vía vcpkg
+        run: vcpkg install "ffmpeg[avcodec,avformat,swscale,swresample]:x64-windows-static-md"
+
+      - name: Cache de cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client
+
+      - name: Compilar skry (release)
+        working-directory: client
+        env:
+          VCPKG_ROOT: C:\vcpkg
+          VCPKGRS_TRIPLET: x64-windows-static-md
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: cargo build --release -p skry
+
+      - name: Subir el binario
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skry-windows-x64
+          path: client/target/release/skry.exe
+
   # Módulo Kotlin/JVM del server (protocolo). No necesita Android SDK; corre en
   # la imagen de gradle como usuario no-root. Valida la paridad del wire con Rust.
   server-protocol:
