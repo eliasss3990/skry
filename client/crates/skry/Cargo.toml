@@ -1,0 +1,23 @@
+[package]
+name = "skry"
+version = "0.1.0"
+description = "skry: espejá la pantalla de tu Android en la PC, con baja latencia, desde la terminal"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "skry"
+path = "src/main.rs"
+
+[dependencies]
+skry-adb = { path = "../skry-adb" }
+skry-proto = { path = "../skry-proto" }
+skry-video = { path = "../skry-video" }
+# Pineado: versiones más nuevas arrastran clap_lex 1.x que exige un cargo > 1.83.
+clap = { version = "=4.5.20", features = ["derive"] }
+
+[lints]
+workspace = true
