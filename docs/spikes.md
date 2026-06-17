@@ -73,7 +73,14 @@ sin Rust. Aísla "¿la captura funciona?" de todo lo demás.
 | PNG negro, proceso OK | FLAG_SECURE / One UI black-screen (problema de **captura**, no de encode) | Investigar flags del display; probar `--new-display` |
 | Crash en `createVirtualDisplay` | Camino equivocado o firma cambiada por Samsung | Revisar el log de métodos enumerados |
 
-## Spike 2 — Encode a archivo local
+## Spike 2 — Encode a archivo local — ✅ PASÓ
+
+**Resultado (2026-06-17, S24 Ultra)**: PASÓ. El encoder H.265 por hardware
+`c2.qti.hevc.encoder` produjo un elementary stream HEVC válido (44.717 bytes)
+desde el mismo virtual display del Spike 1. R8 (encoder negro) despejado. El
+conteo de ~1 frame en 3 s es esperado: un mirror solo emite frames nuevos cuando
+la pantalla cambia; con la pantalla estática solo sale el keyframe inicial. Con
+movimiento, los frames fluyen.
 
 **Objetivo**: aislar el encoder (MediaCodec puede dar negro aun con captura OK
 en Samsung 15). Solo tras un PNG con contenido.
