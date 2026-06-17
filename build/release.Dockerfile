@@ -22,7 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Compilar como usuario no-root (mínimo privilegio, ADR-0006). WORKDIR tras USER
 # crea /src con dueño builder, así cargo puede escribir target/.
+# CARGO_HOME bajo /src (del usuario) evita depender de permisos del CARGO_HOME
+# global de la imagen base (root) para el registry/cache.
 USER builder
+ENV CARGO_HOME=/src/.cargo
 WORKDIR /src
 COPY --chown=builder:builder client/ .
 # --locked: respeta Cargo.lock, build reproducible. El jar del server se embebe
