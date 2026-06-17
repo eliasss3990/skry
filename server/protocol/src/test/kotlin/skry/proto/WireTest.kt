@@ -120,8 +120,41 @@ class WireTest {
     @Test
     fun streamTypeRoundTrip() {
         for (s in StreamType.entries) {
-            assertEquals(s, StreamType.read(roundTrip { s.write(it) }))
+            val bos = ByteArrayOutputStream()
+            s.write(DataOutputStream(bos))
+            // El tipo de stream es exactamente 1 byte (paridad con Rust).
+            assertEquals(1, bos.size())
+            assertEquals(s, StreamType.read(DataInputStream(ByteArrayInputStream(bos.toByteArray()))))
         }
+    }
+
+    @Test
+    fun framePayloadRoundTrip() {
+        // Frame con payload real (no solo len=0): escribir header + payload y
+        // releer ambos, como hará el server al emitir frames de video.
+        val header = FrameHeader(pts = 99, keyframe = false, config = true, len = 4)
+        val payload = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
+        val bos = ByteArrayOutputStream()
+        DataOutputStream(bos).use { out ->
+            header.write(out)
+            out.write(payload)
+        }
+        val din = DataInputStream(ByteArrayInputStream(bos.toByteArray()))
+        val backHeader = FrameHeader.read(din)
+        val backPayload = ByteArray(backHeader.len.toInt())
+        din.readFully(backPayload)
+        assertEquals(header, backHeader)
+        assertTrue(payload.contentEquals(backPayload))
+    }
+
+    @Test
+    fun serverPongByteLayoutMatchesWire() {
+        // Paridad EXACTA de bytes de un mensaje de control (no solo handshake):
+        // Pong = tag 0x81 + seq u32 BE. El mismo literal se verifica en Rust.
+        val bos = ByteArrayOutputStream()
+        ServerMessage.Pong(0x01020304).write(DataOutputStream(bos))
+        val expected = byteArrayOf(0x81.toByte(), 0x01, 0x02, 0x03, 0x04)
+        assertTrue(expected.contentEquals(bos.toByteArray()))
     }
 
     @Test

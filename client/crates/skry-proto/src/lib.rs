@@ -212,6 +212,16 @@ mod tests {
     }
 
     #[test]
+    fn server_pong_byte_layout() {
+        // Paridad EXACTA de bytes con el test Kotlin serverPongByteLayout:
+        // Pong = tag 0x81 + seq u32 BE. Si un lado cambia el tag o el orden,
+        // estos dos tests divergen.
+        let mut buf = Vec::new();
+        ServerMessage::Pong(0x0102_0304).write(&mut buf).unwrap();
+        assert_eq!(buf, vec![0x81, 0x01, 0x02, 0x03, 0x04]);
+    }
+
+    #[test]
     fn stream_type_round_trip() {
         for s in [StreamType::Video, StreamType::Control] {
             let mut buf = Vec::new();
