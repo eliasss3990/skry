@@ -80,8 +80,14 @@ por componente:
 | `skry` (binario orquestador) | Pendiente |
 | `skry-transport` | Pendiente |
 | `skry-video` (decode/render) | Pendiente |
-| Server Android (`server/`) | Pendiente |
+| Server Android (`server/`) | `:protocol` (wire Kotlin) implementado; módulo `:app` real pendiente |
 | Install scripts / release CI | Pendiente |
+
+**Validación en device (spikes)**: la captura, el encode y el transporte
+end-to-end están **validados en el S24 Ultra (Android 16)** vía los spikes en
+`server/spike/` (Java) + `client/crates/transport-spike/` (Rust). Ver
+[spikes.md](spikes.md). Los componentes productivos (`:app`, orquestador `skry`,
+`skry-video`) se construyen sobre esa base ya probada.
 
 ## Componentes
 

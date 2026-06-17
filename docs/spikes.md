@@ -92,7 +92,13 @@ en Samsung 15). Solo tras un PNG con contenido.
 - Si reproduce → encoder OK. Si negro → problema de encoder (probar otro códec /
   sw encoder), no de captura.
 
-## Spike 3 — Sockets sobre el túnel ADB + cliente Rust
+## Spike 3 — Sockets sobre el túnel ADB + cliente Rust — ✅ PASÓ
+
+**Resultado (2026-06-17, S24 Ultra)**: PASÓ. El cliente Rust (`transport-spike`,
+que ejercita `skry-adb` + `skry-proto`) lanzó el server (`Spike3Main`) vía
+app_process, hizo el forward, recibió el handshake (`SM-S928B 1440x3120 codec=h265`)
+y **949 frames / ~10 MB** de H.265 por el túnel ADB en 10 s. Paridad de wire
+Java↔Rust confirmada end-to-end en device. Todo el transporte del MVP validado.
 
 **Objetivo**: recién acá entran la red y el wire ya testeado. Solo tras Spike 2.
 
