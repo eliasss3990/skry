@@ -1,0 +1,19 @@
+[package]
+name = "skry-video"
+version = "0.1.0"
+description = "Decode (FFmpeg) y render (SDL2) del stream de skry, con presentación por pts"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# ffmpeg-next pineado a la major de FFmpeg disponible en el entorno de build
+# (Debian bookworm = FFmpeg 5.1 = libavcodec 59).
+skry-proto = { path = "../skry-proto" }
+ffmpeg-next = "5.1.1"
+sdl2 = "0.37"
+
+[lints]
+workspace = true
