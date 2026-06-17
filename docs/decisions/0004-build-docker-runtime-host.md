@@ -27,6 +27,18 @@ Esto es coherente con la regla docker-first y su excepción de bootstrapping:
 Docker para todo lo que sea toolchain reproducible; nativo sólo donde el acceso
 directo a hardware lo exige, documentado acá como excepción justificada.
 
+### Builds de Windows: nativos en CI, no cross-compile
+
+El binario final enlaza FFmpeg y SDL2. **Cross-compilar esas libs nativas desde
+Linux a Windows (mingw) es frágil y costoso**: hay que proveer builds Windows de
+todo el árbol multimedia. Es justo el tipo de atajo que termina en deuda.
+
+Decisión robusta: el binario de **Windows se compila en un runner
+`windows-latest` de GitHub Actions** (entorno Windows real), resolviendo
+FFmpeg/SDL2 con un gestor de paquetes nativo (vcpkg o binarios prebuilt). El
+binario de **Linux se compila en la imagen Docker** de este ADR. Cada plataforma
+se buildea en su propio entorno; no se cross-compila multimedia.
+
 ## Consecuencias
 
 - **Positivas**: builds reproducibles e idénticos a CI; cero contaminación del

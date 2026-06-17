@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Wrapper para correr el toolchain del cliente Rust dentro de la imagen de build
+# dockerizada (ADR-0004). Mapea el usuario del host para no dejar archivos
+# root-owned en el árbol, y cachea el registry/target de cargo en el repo.
+#
+#   scripts/dev cargo test           # corre cargo test en el workspace client/
+#   scripts/dev cargo clippy --all-targets -- -D warnings
+#   scripts/dev cargo fmt --check
+#   scripts/dev bash                 # shell interactiva en la imagen
+#
+# Construye la imagen la primera vez si no existe.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE="skry-build-client:local"
+DOCKERFILE="$REPO_ROOT/build/client.Dockerfile"
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "[dev] construyendo imagen $IMAGE (primera vez)..." >&2
+    docker build -t "$IMAGE" -f "$DOCKERFILE" "$REPO_ROOT"
+fi
+
+# Asigna TTY sólo si la sesión es interactiva (en CI/pipes no hay TTY).
+tty_flags=()
+if [ -t 0 ] && [ -t 1 ]; then
+    tty_flags=(-it)
+fi
+
+# CARGO_HOME local al repo (gitignored) para cachear deps entre corridas sin
+# tocar el home del host ni requerir permisos de root.
+exec docker run --rm "${tty_flags[@]}" \
+    --user "$(id -u):$(id -g)" \
+    -e CARGO_HOME=/work/.cargo-home \
+    -v "$REPO_ROOT/client":/work \
+    -w /work \
+    "$IMAGE" "${@:-bash}"
