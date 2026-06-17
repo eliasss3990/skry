@@ -27,6 +27,15 @@ Las marchas altas (**120 / 144 FPS**) son **opt-in explícito** por flag
 (`--gear 144`). El sistema de marchas sólo *sube* si el dispositivo y la red lo
 sostienen; ante inestabilidad baja solo.
 
+### Relación entre "tasa nativa del panel" y las marchas discretas
+
+Las marchas son tres valores fijos (60/120/144). La "tasa nativa del panel" se
+usa sólo como **tope**: el FPS efectivo objetivo es `min(tasa_nativa, fps_marcha)`.
+Un panel de 90 Hz con marcha `Low` (60) captura a 60; con marcha `Mid` (120)
+captura a 90 (acotado por el panel), no a 120. Es decir, la marcha fija un
+*techo* de FPS y el panel otro; gana el menor. `Gear::from_fps` mapea un FPS
+pedido por el usuario a la marcha mínima que lo cubre (techo): pedir 70 da `Mid`.
+
 ## Consecuencias
 
 - **Positivas**: buena experiencia desde el primer arranque en cualquier

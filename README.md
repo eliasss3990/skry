@@ -60,7 +60,13 @@ curl -sSL https://raw.githubusercontent.com/eliasss3990/skry/main/scripts/instal
 ```
 
 Ambos scripts dejan el binario en el PATH global para que `skry` se invoque
-desde cualquier carpeta.
+desde cualquier carpeta — la experiencia es un solo comando, como `gh`.
+
+> Nota de distribución: `skry` enlaza FFmpeg y SDL2 (libs nativas). Según la
+> plataforma, el paquete de instalación puede incluir esas libs junto al binario
+> (p. ej. DLLs en Windows); el install script las coloca de modo que vos sólo
+> escribís `skry`. Es decir: la *experiencia* es la de un binario único en el
+> PATH, aunque el paquete no sea literalmente un solo archivo.
 
 ## Build desde el código
 

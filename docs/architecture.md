@@ -68,6 +68,21 @@ Resumen:
 | [0005](decisions/0005-inalambrico-y-local.md) | Operación inalámbrica (ADB sobre Wi-Fi) y 100% local, sin internet ni datos móviles | Aceptada |
 | [0006](decisions/0006-minimo-privilegio.md) | Mínimo privilegio (contenedores no-root, server como uid shell) y artefactos limpios (multi-stage) | Aceptada |
 
+## Estado de implementación
+
+Este documento describe el diseño completo; no todo está construido aún. Estado
+por componente:
+
+| Componente | Estado |
+|------------|--------|
+| `skry-proto` (protocolo) | Implementado y testeado |
+| `skry-adb` (wrapper adb) | Implementado y testeado (falta `connect`/`pair`/mDNS para el flujo inalámbrico completo) |
+| `skry` (binario orquestador) | Pendiente |
+| `skry-transport` | Pendiente |
+| `skry-video` (decode/render) | Pendiente |
+| Server Android (`server/`) | Pendiente |
+| Install scripts / release CI | Pendiente |
+
 ## Componentes
 
 ### Cliente (Rust)

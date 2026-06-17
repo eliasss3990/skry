@@ -9,13 +9,20 @@ ninguna librería de serialización.
 
 Sobre el túnel ADB. El server escucha en un *localabstract socket* llamado
 `skry`. El cliente hace `adb forward tcp:<puerto-local> localabstract:skry` y
-abre **dos conexiones** al puerto local, en orden:
+abre **dos conexiones** al puerto local. Un solo `forward`, dos sockets.
 
-1. **Primera conexión = canal de video** (server → cliente, unidireccional).
-2. **Segunda conexión = canal de control** (bidireccional).
+Apenas conecta cada socket, el **cliente envía 1 byte de tipo de stream** como
+primer dato:
 
-Un solo `forward`, dos sockets. El server distingue los canales por el orden de
-aceptación (igual enfoque que scrcpy).
+| Byte | Canal |
+|------|-------|
+| `0x00` | Video (server → cliente, unidireccional) |
+| `0x01` | Control (bidireccional) |
+
+El server **enruta por ese byte, no por el orden de aceptación**. Esto vuelve el
+emparejamiento de canales robusto ante cualquier transporte (túnel ADB hoy,
+Wi-Fi Direct / LAN mañana), donde el orden de llegada puede no ser determinista.
+En el canal de video, tras el byte de tipo sigue el handshake.
 
 ## Tipos primitivos
 

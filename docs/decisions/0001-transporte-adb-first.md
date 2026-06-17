@@ -48,3 +48,22 @@ sí aportan (control de congestión propio sobre un medio con pérdidas).
 - **Negativas**: sobre TCP, una pérdida puntual puede agregar latencia por
   retransmisión. Aceptable sobre el enlace USB/local; cuando importe, el
   transporte P2P con SRT lo direcciona.
+
+### Riesgo de latencia sobre Wi-Fi (R2 del pre-mortem)
+
+El caso primario es Wi-Fi (ADR-0005), no USB. Sobre Wi-Fi la pérdida de paquetes
+no es puntual sino habitual bajo interferencia, y TCP reacciona con
+**head-of-line blocking**: un frame perdido congela todo el stream hasta
+retransmitir — lo contrario de lo que querés en video en vivo (donde preferís
+descartar un frame viejo y seguir). La palanca real para esto (UDP/SRT con
+descarte) está **diferida** al transporte P2P futuro; no está en el MVP.
+
+Consecuencias asumidas:
+
+- **Expectativa honesta**: 60 FPS (marcha `Low`) es el caso sólido por Wi-Fi;
+  120/144 son aspiracionales y dependen de que la red lo aguante. El sistema de
+  marchas baja solo a 60 si hay inestabilidad. No vender 144-por-Wi-Fi como
+  garantía.
+- **Validar latencia temprano**: medir glass-to-glass en el dispositivo real
+  (S24) es un spike prioritario, antes de construir el resto del andamiaje. Es
+  el riesgo número uno del proyecto.
