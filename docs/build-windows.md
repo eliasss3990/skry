@@ -10,6 +10,10 @@ para producir un único `.exe` sin DLLs al lado. Ver
 En PowerShell:
 
 ```powershell
+# Compilador C++ de Microsoft (MSVC). Lo necesitan vcpkg (compila FFmpeg desde
+# fuente) y Rust MSVC (linker). Descarga grande (varios GB).
+winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
 winget install Rustlang.Rustup   # toolchain Rust (usa rust-toolchain.toml -> 1.83)
 winget install LLVM.LLVM         # libclang, requerido por ffmpeg-sys-next (bindgen)
 ```
