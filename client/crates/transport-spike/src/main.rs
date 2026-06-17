@@ -104,7 +104,16 @@ fn try_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
 
 fn stream(port: u16, pipe: bool) -> Result<(), Box<dyn Error>> {
     let (mut stream, handshake) = connect_and_handshake(port)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    // En vivo (pipe): lectura bloqueante sin timeout. Un mirror sólo emite
+    // frames cuando la pantalla cambia, así que un timeout cortaría el stream
+    // ante pantalla estática (y un read_exact a medias desincronizaría). Se
+    // corta con Ctrl-C. A archivo: timeout para respetar la captura acotada.
+    let read_timeout = if pipe {
+        None
+    } else {
+        Some(Duration::from_secs(5))
+    };
+    stream.set_read_timeout(read_timeout)?;
     eprintln!(
         "[transport-spike] handshake OK: {} {}x{} codec={}",
         handshake.device_name,
