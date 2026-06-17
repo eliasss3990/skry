@@ -28,7 +28,7 @@ fi
 
 # CARGO_HOME local al repo (gitignored) para cachear deps entre corridas sin
 # tocar el home del host ni requerir permisos de root.
-exec docker run --rm "${tty_flags[@]}" \
+exec docker run --rm ${tty_flags[@]+"${tty_flags[@]}"} \
     --user "$(id -u):$(id -g)" \
     -e CARGO_HOME=/work/.cargo-home \
     -v "$REPO_ROOT/client":/work \

@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libavcodec59 libavformat59 libavutil57 libavdevice59 \
         libswscale6 libsdl2-2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 skry
+    && useradd --create-home --no-log-init --uid 10001 skry
 
 COPY --from=builder /src/target/release/skry /usr/local/bin/skry
 

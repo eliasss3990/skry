@@ -57,4 +57,4 @@ jobs:
           workspaces: client
 
       - name: Tests (crates sin deps nativas)
-        run: cargo test -p skry-proto
+        run: cargo test -p skry-proto -p skry-adb

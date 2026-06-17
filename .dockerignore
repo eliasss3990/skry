@@ -1,0 +1,9 @@
+# Mantener el contexto de build chico y reproducible.
+.git/
+client/target/
+client/.cargo-home/
+dist/
+out/
+*.log
+.vscode/
+.idea/

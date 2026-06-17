@@ -29,7 +29,7 @@ RUN rustup component add clippy rustfmt
 # además el usuario del host (uid:gid) para que los artefactos en el volumen
 # montado no queden root-owned; este USER es la red de seguridad si se corre la
 # imagen sin ese mapeo (p. ej. en CI).
-RUN useradd --create-home --uid 10001 builder
+RUN useradd --create-home --no-log-init --uid 10001 builder
 USER builder
 
 WORKDIR /work
