@@ -45,3 +45,16 @@ impl StreamType {
         StreamType::from_u8(read_u8(r)?)
     }
 }
+
+impl From<StreamType> for u8 {
+    fn from(s: StreamType) -> u8 {
+        s.to_u8()
+    }
+}
+
+impl TryFrom<u8> for StreamType {
+    type Error = ProtoError;
+    fn try_from(v: u8) -> Result<StreamType> {
+        StreamType::from_u8(v)
+    }
+}

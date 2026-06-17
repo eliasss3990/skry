@@ -90,7 +90,15 @@ impl Adb {
 
     /// Empareja por código con `host:puerto` (`adb pair`). El emparejamiento
     /// requiere que el usuario lea el código en el teléfono (Android lo exige).
+    /// El código de pairing de Android es de 6 dígitos: se valida antes de
+    /// invocar adb para no pasar argumentos inesperados.
     pub fn pair(&self, host_port: &str, code: &str) -> Result<()> {
+        if code.is_empty() || !code.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(AdbError::PairFailed {
+                target: host_port.to_string(),
+                detail: "el codigo de pairing debe ser numerico".to_string(),
+            });
+        }
         crate::wireless::parse_pair_result(host_port, &self.run(&["pair", host_port, code])?)
     }
 
@@ -149,14 +157,17 @@ impl Target {
         let out = self.run_args(&["forward", local, remote])?;
         // Si el daemon arranca en este comando, su mensaje precede al puerto;
         // tomar la última línea no vacía descarta ese ruido.
-        let port = out
-            .lines()
-            .rev()
-            .map(str::trim)
-            .find(|l| !l.is_empty())
-            .unwrap_or("")
-            .to_string();
-        Ok(port)
+        let port = out.lines().rev().map(str::trim).find(|l| !l.is_empty());
+        match port {
+            Some(p) => Ok(p.to_string()),
+            // No devolver "" en silencio: el caller lo parsearía a puerto y
+            // fallaría sin contexto. Reportar el comando como fallido.
+            None => Err(AdbError::CommandFailed {
+                args: vec!["forward".into(), local.into(), remote.into()],
+                code: None,
+                stderr: "adb forward no devolvio puerto".into(),
+            }),
+        }
     }
 
     /// Elimina un forward previamente creado.
@@ -284,5 +295,20 @@ mod tests {
         let _g = stub_guard();
         let t = stub_target("#!/bin/sh\nexit 2\n", "kill2");
         assert!(t.kill_server("com.skry.server.Main").is_err());
+    }
+
+    #[test]
+    fn pair_rejects_non_numeric_code() {
+        // La validacion del codigo ocurre antes de invocar adb, asi que no
+        // necesita un stub: rechaza sin ejecutar nada.
+        let adb = Adb::new();
+        assert!(matches!(
+            adb.pair("h:42000", "abc"),
+            Err(AdbError::PairFailed { .. })
+        ));
+        assert!(matches!(
+            adb.pair("h:42000", ""),
+            Err(AdbError::PairFailed { .. })
+        ));
     }
 }

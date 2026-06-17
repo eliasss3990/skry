@@ -70,6 +70,8 @@ impl FrameHeader {
 
 /// Lee un frame completo (cabecera + payload) en un `Vec<u8>` nuevo.
 ///
+/// Bloquea hasta completar: el caller debe imponer un timeout en el socket
+/// (`set_read_timeout`) o un emisor lento cuelga el hilo (ver doc del crate).
 /// Conveniencia para el receptor. El payload se acota por `MAX_FRAME_BYTES`
 /// dentro de `FrameHeader::read` antes de reservar, y la reserva usa
 /// `try_reserve` (ver [`read_exact_buf`]), de modo que un tamaño hostil produce

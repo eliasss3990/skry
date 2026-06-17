@@ -161,6 +161,12 @@ mod tests {
     }
 
     #[test]
+    fn connect_case_insensitive() {
+        // El parseo es case-insensitive: adb podria variar mayusculas.
+        assert!(parse_connect_result("h:5555", "CONNECTED TO h:5555").is_ok());
+    }
+
+    #[test]
     fn connect_ok_after_daemon_prefix() {
         // Antiregresion: la linea de exito viene DESPUES del mensaje de daemon.
         let out = "* daemon not running; starting now at tcp:5037 *\n\

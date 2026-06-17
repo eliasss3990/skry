@@ -29,6 +29,8 @@ impl Handshake {
 
     /// Lee y valida el handshake. Falla si el magic o la versión no coinciden,
     /// de modo que un cliente y un server incompatibles no avancen a ciegas.
+    /// Bloquea hasta completar: el caller debe imponer un timeout en el socket
+    /// (`set_read_timeout`), ver doc del crate.
     pub fn read<R: Read>(r: &mut R) -> Result<Handshake> {
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
