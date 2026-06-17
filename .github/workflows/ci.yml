@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancela corridas viejas del mismo ref si llega un push nuevo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build, lint y tests del cliente en Linux, dentro de la imagen de build
+  # dockerizada (paridad exacta con el desarrollo local, ADR-0004).
+  client-linux:
+    name: Cliente (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir imagen de build
+        run: docker build -t skry-build-client:local -f build/client.Dockerfile .
+
+      - name: Formato
+        run: docker run --rm -v "$PWD/client":/work -w /work skry-build-client:local cargo fmt --check
+
+      - name: Clippy
+        run: docker run --rm -v "$PWD/client":/work -w /work skry-build-client:local cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: docker run --rm -v "$PWD/client":/work -w /work skry-build-client:local cargo test
+
+  # Build y tests del cliente en Windows nativo (sin cross-compile, ADR-0004).
+  # Las libs nativas (FFmpeg/SDL2) se instalan con vcpkg cuando el crate de video
+  # las requiera; por ahora valida los crates sin deps nativas.
+  client-windows:
+    name: Cliente (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain Rust
+        uses: dtolnay/rust-toolchain@1.83.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache de cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client
+
+      - name: Tests (crates sin deps nativas)
+        run: cargo test -p skry-proto
