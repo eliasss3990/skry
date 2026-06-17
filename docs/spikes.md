@@ -2,7 +2,7 @@
 
 El corazón del riesgo de skry no es el código ya escrito (protocolo, adb), sino
 la **captura de pantalla en Android** sobre el dispositivo de validación: un
-Samsung S24 Ultra (One UI, Android 14/15), de los entornos más hostiles para
+Samsung S24 Ultra (One UI 8, Android 16), de los entornos más hostiles para
 esta técnica (scrcpy tiene issues abiertos sin fix en este hardware).
 
 Por eso, **antes de construir el pipeline completo** (encode → red → decode →
@@ -38,9 +38,9 @@ Antes de cualquier spike, en el S24 (por **USB**, no Wi-Fi todavía — ver R4):
 - [ ] `adb shell id` → confirmar `uid=2000(shell)`.
 - [ ] Anotar versión exacta (cambia el camino de captura):
   ```
-  adb shell getprop ro.build.version.release   # 14 o 15
-  adb shell getprop ro.build.version.sdk        # 34 o 35
-  adb shell getprop ro.build.version.oneui      # One UI 6 vs 7
+  adb shell getprop ro.build.version.release   # confirmado: 16
+  adb shell getprop ro.build.version.sdk        # confirmado: 36
+  adb shell getprop ro.build.version.oneui      # confirmado: 80500 (One UI 8)
   ```
 
 ## Spike 1 — Captura saca 1 frame a PNG (el más importante) — ✅ PASÓ
@@ -60,7 +60,7 @@ sin Rust. Aísla "¿la captura funciona?" de todo lo demás.
   2. Resuelve resolución con `DisplayManagerGlobal.getDisplayInfo(0)`.
   3. Crea un `ImageReader` (NO MediaCodec) y obtiene su `Surface`.
   4. `DisplayManager.createVirtualDisplay(name, w, h, displayIdToMirror=0,
-     surface)` por reflexión **estática** (camino correcto Android 14/15).
+     surface)` por reflexión **estática** (camino correcto Android 16, validado).
   5. Lee 1 `Image` y la vuelca a PNG en `/data/local/tmp/frame.png`.
   6. Ante `NoSuchMethodException`: enumerar `getDeclaredMethods()` y logear con
      `Build.MANUFACTURER/MODEL` y `SDK_INT` (Samsung cambia firmas).

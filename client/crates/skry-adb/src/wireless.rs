@@ -112,12 +112,12 @@ mod tests {
     #[test]
     fn parses_mdns_services() {
         let out = "List of discovered mdns services\n\
-            adb-R5CY139AG4E-AbCdEf\t_adb-tls-connect._tcp\t192.168.1.5:37251\n\
-            adb-R5CY139AG4E-AbCdEf\t_adb-tls-pairing._tcp\t192.168.1.5:42000\n";
+            adb-R5CYTEST0001-AbCdEf\t_adb-tls-connect._tcp\t192.0.2.5:37251\n\
+            adb-R5CYTEST0001-AbCdEf\t_adb-tls-pairing._tcp\t192.0.2.5:42000\n";
         let svcs = parse_mdns_services(out);
         assert_eq!(svcs.len(), 2);
         assert_eq!(svcs[0].kind, MdnsKind::Connect);
-        assert_eq!(svcs[0].addr, "192.168.1.5:37251");
+        assert_eq!(svcs[0].addr, "192.0.2.5:37251");
         assert_eq!(svcs[1].kind, MdnsKind::Pairing);
     }
 
@@ -136,8 +136,8 @@ mod tests {
     #[test]
     fn connect_failure_is_error() {
         let err = parse_connect_result(
-            "192.168.1.5:5555",
-            "failed to connect to '192.168.1.5:5555': Connection refused",
+            "192.0.2.5:5555",
+            "failed to connect to '192.0.2.5:5555': Connection refused",
         )
         .unwrap_err();
         assert!(matches!(err, AdbError::ConnectFailed { .. }));
@@ -171,7 +171,7 @@ mod tests {
         // Antiregresion: la linea de exito viene DESPUES del mensaje de daemon.
         let out = "* daemon not running; starting now at tcp:5037 *\n\
             * daemon started successfully *\n\
-            connected to 192.168.1.5:5555\n";
-        assert!(parse_connect_result("192.168.1.5:5555", out).is_ok());
+            connected to 192.0.2.5:5555\n";
+        assert!(parse_connect_result("192.0.2.5:5555", out).is_ok());
     }
 }

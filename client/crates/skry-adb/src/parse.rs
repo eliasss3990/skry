@@ -121,24 +121,24 @@ mod tests {
     use crate::model::Transport;
 
     const SAMPLE: &str = "List of devices attached\n\
-        R5CY139AG4E            device usb:1-1.4 product:e1q model:SM_S928B device:e1q transport_id:1\n\
-        192.168.1.5:37251      device product:e1q model:SM_S928B device:e1q transport_id:2\n";
+        R5CYTEST0001            device usb:1-1.4 product:e1q model:SM_S928B device:e1q transport_id:1\n\
+        192.0.2.5:37251      device product:e1q model:SM_S928B device:e1q transport_id:2\n";
 
     #[test]
     fn parses_usb_and_wifi() {
         let devs = parse_devices(SAMPLE);
         assert_eq!(devs.len(), 2);
-        assert_eq!(devs[0].serial, "R5CY139AG4E");
+        assert_eq!(devs[0].serial, "R5CYTEST0001");
         assert_eq!(devs[0].transport, Transport::Usb);
         assert_eq!(devs[0].model.as_deref(), Some("SM S928B"));
-        assert_eq!(devs[1].serial, "192.168.1.5:37251");
+        assert_eq!(devs[1].serial, "192.0.2.5:37251");
         assert_eq!(devs[1].transport, Transport::Wifi);
     }
 
     #[test]
     fn parses_unauthorized_without_model() {
         let out =
-            "List of devices attached\nR5CY139AG4E       unauthorized usb:1-1 transport_id:3\n";
+            "List of devices attached\nR5CYTEST0001       unauthorized usb:1-1 transport_id:3\n";
         let devs = parse_devices(out);
         assert_eq!(devs.len(), 1);
         assert_eq!(devs[0].state, DeviceState::Unauthorized);
@@ -156,10 +156,10 @@ mod tests {
         let out = "* daemon not running; starting now at tcp:5037 *\n\
             * daemon started successfully *\n\
             List of devices attached\n\
-            R5CY139AG4E device transport_id:1\n";
+            R5CYTEST0001 device transport_id:1\n";
         let devs = parse_devices(out);
         assert_eq!(devs.len(), 1);
-        assert_eq!(devs[0].serial, "R5CY139AG4E");
+        assert_eq!(devs[0].serial, "R5CYTEST0001");
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn infers_mdns_wireless_as_wifi() {
         let out = "List of devices attached\n\
-            adb-R5CY139AG4E-AbCdEf._adb-tls-connect._tcp device transport_id:1\n";
+            adb-R5CYTEST0001-AbCdEf._adb-tls-connect._tcp device transport_id:1\n";
         let devs = parse_devices(out);
         assert_eq!(devs[0].transport, Transport::Wifi);
     }
@@ -197,7 +197,7 @@ mod tests {
         // Tomar solo el USB para tener uno listo.
         let one = vec![devs[0].clone()];
         let sel = select_device(&one, None).unwrap();
-        assert_eq!(sel.serial, "R5CY139AG4E");
+        assert_eq!(sel.serial, "R5CYTEST0001");
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn select_by_serial_picks_exact() {
         let devs = parse_devices(SAMPLE);
-        let sel = select_device(&devs, Some("192.168.1.5:37251")).unwrap();
+        let sel = select_device(&devs, Some("192.0.2.5:37251")).unwrap();
         assert_eq!(sel.transport, Transport::Wifi);
     }
 
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn select_single_unauthorized_yields_unauthorized() {
-        let out = "List of devices attached\nR5CY139AG4E unauthorized transport_id:1\n";
+        let out = "List of devices attached\nR5CYTEST0001 unauthorized transport_id:1\n";
         let devs = parse_devices(out);
         assert!(matches!(
             select_device(&devs, None),
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn select_single_offline_yields_not_ready() {
-        let out = "List of devices attached\nR5CY139AG4E offline transport_id:1\n";
+        let out = "List of devices attached\nR5CYTEST0001 offline transport_id:1\n";
         let devs = parse_devices(out);
         assert!(matches!(
             select_device(&devs, None),

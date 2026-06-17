@@ -77,10 +77,11 @@ por componente:
 |------------|--------|
 | `skry-proto` (protocolo) | Implementado y testeado |
 | `skry-adb` (wrapper adb) | Implementado y testeado (incluye `connect`/`pair`/descubrimiento mDNS) |
-| `skry` (binario orquestador) | Pendiente |
-| `skry-transport` | Pendiente |
-| `skry-video` (decode/render) | Pendiente |
-| Server Android (`server/`) | `:protocol` (wire Kotlin) implementado; módulo `:app` real pendiente |
+| `skry` (binario orquestador) | Implementado (CLI clap, lazo decode/render por pts); falta build Windows (vcpkg) y embeber el jar |
+| `skry-transport` | Pendiente (la abstracción de transporte se formaliza al sumar Wi-Fi Direct) |
+| `skry-video` (decode/render) | Implementado (FFmpeg software + SDL2 + PresentationClock); hw decode pendiente |
+| Server Android (`server/`) | `:protocol` (wire Kotlin) implementado; spikes Java validados en device; módulo `:app` productivo pendiente |
+| Build Windows del cliente (vcpkg FFmpeg/SDL2) | Pendiente (ver plan en notas; alinea versión de FFmpeg con Linux) |
 | Install scripts / release CI | Pendiente |
 
 **Validación en device (spikes)**: la captura, el encode y el transporte
