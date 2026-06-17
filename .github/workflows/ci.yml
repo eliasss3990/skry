@@ -57,7 +57,7 @@ jobs:
           workspaces: client
 
       - name: Tests (crates sin deps nativas)
-        run: cargo test -p skry-proto -p skry-adb
+        run: cargo test -p skry-proto -p skry-adb -p transport-spike
 
   # Módulo Kotlin/JVM del server (protocolo). No necesita Android SDK; corre en
   # la imagen de gradle como usuario no-root. Valida la paridad del wire con Rust.

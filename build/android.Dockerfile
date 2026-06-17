@@ -10,6 +10,7 @@ FROM eclipse-temurin:21-jdk-jammy
 # Versión pineada de cmdline-tools (no 'latest' mutable).
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV CMDLINE_TOOLS_VERSION=11076708
+ENV CMDLINE_TOOLS_SHA256=2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258
 ENV ANDROID_PLATFORM=android-36
 ENV ANDROID_BUILD_TOOLS=36.0.0
 
@@ -17,9 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Descargar cmdline-tools e instalar plataforma + build-tools de API 36.
+# Descargar cmdline-tools (con verificación de checksum) e instalar plataforma +
+# build-tools de API 36.
 RUN mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" \
     && curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip" -o /tmp/cmdline-tools.zip \
+    && echo "${CMDLINE_TOOLS_SHA256}  /tmp/cmdline-tools.zip" | sha256sum -c - \
     && unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools" \
     && mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest" \
     && rm /tmp/cmdline-tools.zip
