@@ -222,6 +222,19 @@ mod tests {
     use crate::model::{DeviceState, Transport};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializa los tests que crean y ejecutan un stub. Sin esto, dos tests en
+    /// paralelo disparan ETXTBSY: el `fork` de uno hereda el fd de escritura del
+    /// stub que el otro está creando, y `exec` falla porque el archivo está
+    /// abierto para escritura en otro proceso. El lock garantiza que, al
+    /// ejecutar un stub, ningún otro hilo tenga un stub abierto para escritura.
+    static STUB_LOCK: Mutex<()> = Mutex::new(());
+
+    fn stub_guard() -> MutexGuard<'static, ()> {
+        // Ignorar el envenenamiento: un panic previo no debe cascadear.
+        STUB_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     /// Crea un stub ejecutable que imita a adb y devuelve un `Target` que lo usa.
     fn stub_target(script: &str, name: &str) -> Target {
@@ -249,6 +262,7 @@ mod tests {
     fn forward_returns_last_line_ignoring_daemon_prefix() {
         // El stub imprime la linea de daemon antes del puerto; forward debe
         // devolver solo el puerto (ultima linea no vacia).
+        let _g = stub_guard();
         let t = stub_target(
             "#!/bin/sh\nprintf '* daemon started successfully *\\n39000\\n'\n",
             "forward",
@@ -260,12 +274,14 @@ mod tests {
     #[test]
     fn kill_server_treats_exit_1_as_ok() {
         // pkill sin procesos sale con 1; kill_server lo trata como exito.
+        let _g = stub_guard();
         let t = stub_target("#!/bin/sh\nexit 1\n", "kill");
         assert!(t.kill_server("com.skry.server.Main").is_ok());
     }
 
     #[test]
     fn kill_server_propagates_other_failures() {
+        let _g = stub_guard();
         let t = stub_target("#!/bin/sh\nexit 2\n", "kill2");
         assert!(t.kill_server("com.skry.server.Main").is_err());
     }
