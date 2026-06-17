@@ -25,22 +25,32 @@ impl PresentationClock {
         Self::default()
     }
 
+    /// Salto de pts hacia atrás (en µs) que dispara un re-anclaje del reloj.
+    const RESET_BACKWARDS_US: i64 = 1_000_000;
+
     /// Bloquea hasta el momento de presentación del frame con el `pts` dado.
     /// El primer frame fija el origen; los siguientes esperan su offset real.
+    ///
+    /// Si el `pts` salta hacia atrás de forma significativa (reinicio del reloj
+    /// del server, reconexión), se re-ancla el origen para no presentar todo el
+    /// resto en fast-forward.
     pub fn wait_for(&mut self, pts_us: i64) {
-        match self.base_wall {
-            None => {
-                self.base_wall = Some(Instant::now());
-                self.base_pts_us = pts_us;
-            }
-            Some(base) => {
-                let offset = (pts_us - self.base_pts_us).max(0) as u64;
-                let target = base + Duration::from_micros(offset);
-                let now = Instant::now();
-                if target > now {
-                    std::thread::sleep(target - now);
-                }
-            }
+        let reanchor = match self.base_wall {
+            None => true,
+            Some(_) => pts_us < self.base_pts_us.saturating_sub(Self::RESET_BACKWARDS_US),
+        };
+        if reanchor {
+            self.base_wall = Some(Instant::now());
+            self.base_pts_us = pts_us;
+            return;
+        }
+        // `base_wall` es Some por la rama de arriba.
+        let base = self.base_wall.expect("base anclada");
+        let offset = (pts_us - self.base_pts_us).max(0) as u64;
+        let target = base + Duration::from_micros(offset);
+        let now = Instant::now();
+        if target > now {
+            std::thread::sleep(target - now);
         }
     }
 }
@@ -67,6 +77,21 @@ mod tests {
         let start = Instant::now();
         clock.wait_for(0); // pts en el pasado: clamp a 0
         assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn large_backwards_jump_reanchors_and_is_immediate() {
+        // Antiregresión: un salto grande hacia atrás (reinicio del reloj del
+        // server) re-ancla el origen y NO presenta en fast-forward ni espera.
+        let mut clock = PresentationClock::new();
+        clock.wait_for(10_000_000); // base alto
+        let start = Instant::now();
+        clock.wait_for(0); // salto hacia atrás > 1s: re-ancla, vuelve enseguida
+        assert!(start.elapsed() < Duration::from_millis(50));
+        // Tras re-anclar, un pts cercano al nuevo origen tampoco espera de más.
+        let start2 = Instant::now();
+        clock.wait_for(5_000);
+        assert!(start2.elapsed() < Duration::from_millis(100));
     }
 
     #[test]

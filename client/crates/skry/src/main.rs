@@ -9,14 +9,15 @@
 
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 
 use skry_adb::Adb;
-use skry_proto::{read_frame, Handshake, StreamType};
+use skry_proto::{read_frame, FrameHeader, Handshake, StreamType};
 use skry_video::{Decoder, PresentationClock, Renderer};
 
 /// Espejado de pantalla Android → PC, baja latencia, desde la terminal.
@@ -74,8 +75,13 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
 }
 
 /// Conecta el canal de video, lee el handshake y corre el lazo decode→present.
+///
+/// La lectura de la red corre en un hilo aparte que empuja frames por un canal;
+/// el hilo principal sólo decodifica, presenta y procesa eventos. Así el cierre
+/// (tecla Q / cerrar ventana) responde aunque no lleguen frames (pantalla
+/// estática), porque el principal nunca se bloquea leyendo de la red.
 fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
-    let (mut stream, handshake) = connect_and_handshake(port)?;
+    let (stream, handshake) = connect_and_handshake(port)?;
     eprintln!(
         "[skry] {} {}x{} codec={}",
         handshake.device_name,
@@ -89,26 +95,43 @@ fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
     let mut clock = PresentationClock::new();
     let mut frames = Vec::new();
 
-    loop {
+    // Hilo lector: bloquea en read_frame y manda los frames por el canal.
+    let (tx, rx) = mpsc::channel::<(FrameHeader, Vec<u8>)>();
+    let mut reader_stream = stream.try_clone()?;
+    let reader = thread::spawn(move || {
+        // Sale al cerrarse el stream (Err) o al cerrar el principal el canal.
+        while let Ok(frame) = read_frame(&mut reader_stream) {
+            if tx.send(frame).is_err() {
+                break;
+            }
+        }
+    });
+
+    'main: loop {
         if !renderer.pump() {
             break;
         }
-        let (header, payload) = match read_frame(&mut stream) {
-            Ok(frame) => frame,
-            Err(e) => {
-                eprintln!("[skry] fin de stream: {e}");
-                break;
+        match rx.recv_timeout(Duration::from_millis(15)) {
+            Ok((header, payload)) => {
+                decoder.decode(&payload, header.pts as i64, &mut frames)?;
+                for decoded in frames.drain(..) {
+                    clock.wait_for(decoded.pts_us);
+                    renderer.present(&decoded.frame)?;
+                    if !renderer.pump() {
+                        break 'main;
+                    }
+                }
             }
-        };
-        decoder.decode(&payload, header.pts as i64, &mut frames)?;
-        for decoded in frames.drain(..) {
-            clock.wait_for(decoded.pts_us);
-            renderer.present(&decoded.frame)?;
-            if !renderer.pump() {
-                return Ok(());
-            }
+            // Sin frames (pantalla estática): seguir procesando eventos.
+            Err(RecvTimeoutError::Timeout) => {}
+            // El server cerró el stream.
+            Err(RecvTimeoutError::Disconnected) => break,
         }
     }
+
+    // Desbloquear el hilo lector cerrando el socket y unirlo.
+    let _ = stream.shutdown(Shutdown::Both);
+    let _ = reader.join();
     Ok(())
 }
 

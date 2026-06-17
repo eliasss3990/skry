@@ -57,7 +57,13 @@ impl Decoder {
         let mut packet = ffmpeg::Packet::copy(payload);
         packet.set_pts(Some(pts_us));
         packet.set_dts(Some(pts_us));
-        self.decoder.send_packet(&packet)?;
+        // Si el buffer interno está lleno (EAGAIN), drenar la salida y reintentar
+        // una vez. Cubre el caso sin detectar el errno cross-platform: un error
+        // real vuelve a fallar en el reintento y se propaga.
+        if self.decoder.send_packet(&packet).is_err() {
+            self.drain(out)?;
+            self.decoder.send_packet(&packet)?;
+        }
         self.drain(out)
     }
 
