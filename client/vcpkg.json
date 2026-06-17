@@ -1,0 +1,12 @@
+{
+  "name": "skry-client",
+  "version-string": "0.1.0",
+  "description": "Dependencias nativas del cliente skry en Windows (FFmpeg). SDL2 va por el crate (bundled).",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": ["avcodec", "avformat", "avutil", "swscale", "swresample"]
+    }
+  ]
+}

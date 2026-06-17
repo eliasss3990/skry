@@ -9,10 +9,18 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# ffmpeg-next pineado a la major de FFmpeg disponible en el entorno de build
-# (Debian bookworm = FFmpeg 5.1 = libavcodec 59).
+# ffmpeg-next 7.x detecta features por versión y compila contra un rango amplio
+# de FFmpeg: Linux usa el del sistema (apt 5.1) y Windows el de vcpkg (7.x), con
+# la misma crate.
 skry-proto = { path = "../skry-proto" }
-ffmpeg-next = "5.1.1"
+ffmpeg-next = "7.1"
+
+# SDL2: en Windows, `bundled` + `static-link` compila SDL desde fuente y lo
+# enlaza estático → un único .exe sin DLLs. En el resto, el SDL2 del sistema.
+[target.'cfg(windows)'.dependencies]
+sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
+
+[target.'cfg(not(windows))'.dependencies]
 sdl2 = "0.37"
 
 [lints]
