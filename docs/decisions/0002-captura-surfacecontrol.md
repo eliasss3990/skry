@@ -28,29 +28,51 @@ físico sin diálogo de consentimiento.
 El pipeline: crear una `Surface` de entrada del encoder `MediaCodec` y
 conectarla como destino de un virtual display espejo del display físico.
 
-### Ruta por versión de Android (importante)
+### Ruta por versión de Android (hechos verificados)
 
-La API concreta para crear el virtual display **cambió y se cerró con las
-versiones**, y el dispositivo objetivo (Samsung S24 Ultra, Android 14/15) está
-en el extremo nuevo:
+La API concreta para crear el virtual display cambió con las versiones. Hechos
+verificados contra el código y los issues actuales de `scrcpy` (no asumir):
 
-- **`SurfaceControl.createDisplay(String, boolean)` fue REMOVIDO en Android 14.**
-  No usar esa firma como camino de arranque: no existe en el Android del S24.
-- Android 14+ requiere la ruta basada en `DisplayManagerGlobal` /
-  `IDisplayManager` (creación de virtual display por la vía interna no-
-  `MediaProjection`), que volvió a cambiar entre 14 y 15.
+- **Camino primario (espejo del display físico)**: reflexión sobre el método
+  **estático** `android.hardware.display.DisplayManager.createVirtualDisplay(
+  String name, int width, int height, int displayIdToMirror, Surface surface)`
+  con `displayIdToMirror = 0`. **No** es `DisplayManagerGlobal` ni
+  `IDisplayManager` (ésos se usan sólo para `getDisplayInfo`/`getDisplayIds`).
+- **Camino "display nuevo"**: constructor privado `DisplayManager(Context)` con
+  un `FakeContext`, y `createVirtualDisplay(...)` con flags ocultos
+  (`VIRTUAL_DISPLAY_FLAG_OWN_FOCUS`, `FLAG_DEVICE_DISPLAY_GROUP` en API 34+).
+- **`SurfaceControl.createDisplay(String, boolean)` es sólo fallback** para
+  Android ≤ 14. Fue **REMOVIDO en Android 15 / One UI 7** (no en 14). Si el S24
+  ya está en Android 15/One UI 7, ese método no existe.
+- **Orden de intentos**: `DisplayManager.createVirtualDisplay` →
+  (fallback) `SurfaceControl.createDisplay`. No al revés.
 
-Decisión operativa: **portar la estrategia de captura de la versión actual de
-`scrcpy` (2.x/3.x)**, que ya resolvió Android 11→15, en vez de implementar desde
-cero la ruta legacy. La implementación de arranque apunta a **Android 14+**;
-las versiones viejas son, si acaso, fallbacks posteriores. Todo el acceso por
-reflexión se aísla en una capa fina con selección por nivel de API y mensajes de
-error claros si una firma no está.
+### Prerequisitos y trampas en Samsung (S24 Ultra)
 
-> Este es uno de los riesgos altos del proyecto (R3 del pre-mortem): la captura
-> es el corazón del server y el único dispositivo de validación es de los más
-> nuevos + OEM Samsung. Validar **sólo la captura** (sacar 1 frame) en el S24
-> antes de cablear encode/red.
+- **`Workarounds.fillConfigurationController()` (port de scrcpy) es OBLIGATORIO
+  en Samsung**, no opcional: sin él, `DisplayManagerGlobal.getDisplayInfoLocked()`
+  tira NPE desde Android 12. Es prerequisito para que arranque en el device de
+  validación.
+- **Samsung modifica firmas de métodos internos** del framework: ante
+  `NoSuchMethodException`, la capa de reflexión debe **enumerar
+  `getDeclaredMethods()` y logearlos**, junto con `Build.MANUFACTURER/MODEL` y
+  `VERSION.SDK_INT`. "Mensajes claros" significa concretamente esto.
+- **Pantalla negra con resolución correcta**: si cualquier surface del display
+  tiene `FLAG_SECURE` (Samsung Pay/Pass, Secure Folder), o por bugs de One UI, el
+  frame sale negro aunque la captura "funcione". Es un modo de falla de captura,
+  no de encode.
+
+Decisión operativa: **portar la estrategia de captura de `scrcpy` (2.x/3.x)**, que
+ya resolvió Android 11→15, con el camino de arranque correcto de arriba. Aislar
+todo el acceso por reflexión tras una interfaz `ScreenCapture` con selección por
+`SDK_INT`, testeable con dobles; la integración real se valida en el device.
+
+> Riesgo alto (R1-R3 del pre-mortem): la captura es el corazón del server y el
+> único device de validación (Samsung + One UI + Android 14/15) es de los más
+> hostiles para esta técnica — scrcpy tiene issues **abiertos sin fix** en este
+> hardware. Por eso el primer spike es **ImageReader → PNG por USB** (sin
+> MediaCodec, sin red): aísla "¿el display produce píxeles?" de todo lo demás.
+> Detalle del plan de spikes en la tarea correspondiente.
 
 ## Consecuencias
 

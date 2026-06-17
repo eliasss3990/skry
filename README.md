@@ -45,7 +45,9 @@ arquitectura.
 
 ## Instalación
 
-> Disponible al publicarse el primer release. Instalación de un comando:
+> **Todavía no disponible**: los scripts `install.sh`/`install.ps1` y los
+> binarios se publican con el primer release. Los comandos de abajo son la forma
+> de instalación prevista (un solo comando), aún no funcional.
 
 **Windows (PowerShell):**
 
