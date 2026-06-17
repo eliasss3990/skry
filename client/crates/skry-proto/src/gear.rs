@@ -59,8 +59,9 @@ impl Gear {
         }
     }
 
-    /// Mapea un FPS pedido por el usuario a la marcha más cercana hacia arriba.
+    /// Mapea un FPS pedido por el usuario a la marcha mínima que lo cubre (techo).
     /// Cualquier valor <= 60 cae en `Low`; <= 120 en `Mid`; el resto en `High`.
+    /// Ej.: pedir 70 da `Mid` (120), no `Low`.
     pub fn from_fps(fps: u32) -> Gear {
         if fps <= 60 {
             Gear::Low

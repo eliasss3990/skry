@@ -20,6 +20,7 @@ pub mod control;
 pub mod error;
 pub mod gear;
 pub mod handshake;
+pub mod stream;
 pub mod video;
 
 mod wire;
@@ -29,6 +30,7 @@ pub use control::{ClientMessage, ServerMessage, Telemetry};
 pub use error::{ProtoError, Result};
 pub use gear::Gear;
 pub use handshake::Handshake;
+pub use stream::StreamType;
 pub use video::{read_frame, write_frame, FrameHeader, MAX_FRAME_BYTES};
 
 /// Magic que abre el handshake: los bytes ASCII de "SKRY".
@@ -193,6 +195,29 @@ mod tests {
         assert_eq!(Gear::from_fps(60), Gear::Low);
         assert_eq!(Gear::from_fps(144), Gear::High);
         assert_eq!(Gear::from_fps(90), Gear::Mid);
+    }
+
+    #[test]
+    fn stream_type_round_trip() {
+        for s in [StreamType::Video, StreamType::Control] {
+            let mut buf = Vec::new();
+            s.write(&mut buf).unwrap();
+            assert_eq!(buf.len(), 1);
+            assert_eq!(StreamType::read(&mut &buf[..]).unwrap(), s);
+        }
+        assert!(StreamType::from_u8(0xFF).is_err());
+    }
+
+    #[test]
+    fn server_error_empty_message_round_trip() {
+        // Mensaje vacío y código 0: cadena de longitud 0 en el wire.
+        let m = ServerMessage::Error {
+            code: 0,
+            message: String::new(),
+        };
+        let mut buf = Vec::new();
+        m.write(&mut buf).unwrap();
+        assert_eq!(ServerMessage::read(&mut &buf[..]).unwrap(), m);
     }
 
     #[test]
