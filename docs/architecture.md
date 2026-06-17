@@ -76,7 +76,7 @@ por componente:
 | Componente | Estado |
 |------------|--------|
 | `skry-proto` (protocolo) | Implementado y testeado |
-| `skry-adb` (wrapper adb) | Implementado y testeado (falta `connect`/`pair`/mDNS para el flujo inalámbrico completo) |
+| `skry-adb` (wrapper adb) | Implementado y testeado (incluye `connect`/`pair`/descubrimiento mDNS) |
 | `skry` (binario orquestador) | Pendiente |
 | `skry-transport` | Pendiente |
 | `skry-video` (decode/render) | Pendiente |

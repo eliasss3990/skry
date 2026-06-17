@@ -7,6 +7,23 @@ hacer.**
 Cada mensaje al usuario sigue el formato: una línea de diagnóstico y, cuando
 aplica, una línea de solución accionable.
 
+## 0. Emparejamiento inalámbrico (primer uso)
+
+El flujo inalámbrico se apoya en la depuración inalámbrica de Android. Honestamente:
+el **primer emparejamiento exige interacción del usuario en el teléfono** (Android
+lo requiere por diseño; no hay forma 100% manos-libres):
+
+1. En el teléfono: Opciones de desarrollador → Depuración inalámbrica → Emparejar
+   con código. Muestra `host:puerto` y un código.
+2. `skry pair <host:puerto> <código>` → envuelve `adb pair` con mensajes claros.
+3. `skry connect <host:puerto>` (o descubrimiento por mDNS) → `adb connect`.
+
+`skry-adb` provee `pair`, `connect`, `disconnect` y `mdns_services` para esto.
+mDNS puede automatizar el descubrimiento, pero es frágil (depende de multicast en
+la red, falla con VPN o varias NIC), así que no es el único camino: siempre se
+puede dar el `host:puerto` a mano. Una vez emparejado, las reconexiones no piden
+código de nuevo (salvo que el teléfono rote el puerto tras reiniciar Wi-Fi).
+
 ## 1. Conexión física (dominio de ADB)
 
 | Caso | Detección | Comportamiento |

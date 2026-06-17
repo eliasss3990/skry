@@ -70,6 +70,32 @@ impl Adb {
         Ok(parse_devices(&self.run(["devices", "-l"])?))
     }
 
+    /// Descubre dispositivos anunciados por mDNS (depuración inalámbrica).
+    /// Útil para el flujo inalámbrico sin pedir IP al usuario.
+    pub fn mdns_services(&self) -> Result<Vec<crate::wireless::MdnsService>> {
+        Ok(crate::wireless::parse_mdns_services(
+            &self.run(["mdns", "services"])?,
+        ))
+    }
+
+    /// Conecta por Wi-Fi a `host:puerto` (`adb connect`). adb suele devolver
+    /// código 0 aunque falle, por eso se interpreta la salida de texto.
+    pub fn connect(&self, host_port: &str) -> Result<()> {
+        crate::wireless::parse_connect_result(host_port, &self.run(["connect", host_port])?)
+    }
+
+    /// Desconecta un endpoint de red (`adb disconnect`).
+    pub fn disconnect(&self, host_port: &str) -> Result<()> {
+        self.run(["disconnect", host_port])?;
+        Ok(())
+    }
+
+    /// Empareja por código con `host:puerto` (`adb pair`). El emparejamiento
+    /// requiere que el usuario lea el código en el teléfono (Android lo exige).
+    pub fn pair(&self, host_port: &str, code: &str) -> Result<()> {
+        crate::wireless::parse_pair_result(host_port, &self.run(["pair", host_port, code])?)
+    }
+
     /// Resuelve el dispositivo objetivo aplicando la resiliencia de selección.
     pub fn resolve_target(&self, desired_serial: Option<&str>) -> Result<Target> {
         let devices = self.devices()?;
@@ -201,5 +227,56 @@ impl Target {
             Err(AdbError::CommandFailed { code: Some(1), .. }) => Ok(()),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::model::{DeviceState, Transport};
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Crea un stub ejecutable que imita a adb y devuelve un `Target` que lo usa.
+    fn stub_target(script: &str, name: &str) -> Target {
+        let path = std::env::temp_dir().join(format!("skry-adb-stub-{name}"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(script.as_bytes()).unwrap();
+        f.sync_all().unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Target {
+            program: path,
+            device: Device {
+                serial: "TESTSERIAL".into(),
+                state: DeviceState::Device,
+                transport: Transport::Usb,
+                model: None,
+            },
+        }
+    }
+
+    #[test]
+    fn forward_returns_last_line_ignoring_daemon_prefix() {
+        // El stub imprime la linea de daemon antes del puerto; forward debe
+        // devolver solo el puerto (ultima linea no vacia).
+        let t = stub_target(
+            "#!/bin/sh\nprintf '* daemon started successfully *\\n39000\\n'\n",
+            "forward",
+        );
+        let port = t.forward("tcp:0", "localabstract:skry").unwrap();
+        assert_eq!(port, "39000");
+    }
+
+    #[test]
+    fn kill_server_treats_exit_1_as_ok() {
+        // pkill sin procesos sale con 1; kill_server lo trata como exito.
+        let t = stub_target("#!/bin/sh\nexit 1\n", "kill");
+        assert!(t.kill_server("com.skry.server.Main").is_ok());
+    }
+
+    #[test]
+    fn kill_server_propagates_other_failures() {
+        let t = stub_target("#!/bin/sh\nexit 2\n", "kill2");
+        assert!(t.kill_server("com.skry.server.Main").is_err());
     }
 }

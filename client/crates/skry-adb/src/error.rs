@@ -26,6 +26,10 @@ pub enum AdbError {
     NoPermissions { serial: String },
     /// El dispositivo está en un estado no operable (offline, etc.).
     NotReady { serial: String, state: String },
+    /// `adb connect <host:puerto>` no logró conectar.
+    ConnectFailed { target: String, detail: String },
+    /// `adb pair <host:puerto> <código>` no logró emparejar.
+    PairFailed { target: String, detail: String },
     /// Un comando adb terminó con código de error.
     CommandFailed {
         args: Vec<String>,
@@ -78,6 +82,14 @@ impl fmt::Display for AdbError {
             AdbError::NotReady { serial, state } => write!(
                 f,
                 "dispositivo '{serial}' en estado '{state}', no operable.\n-> Solucion: reconecta el dispositivo o reinicia la depuracion."
+            ),
+            AdbError::ConnectFailed { target, detail } => write!(
+                f,
+                "no se pudo conectar a '{target}' por Wi-Fi: {detail}\n-> Solucion: verifica que el telefono este en la misma red y que la Depuracion inalambrica este activa; puede que necesites emparejar primero (skry pair)."
+            ),
+            AdbError::PairFailed { target, detail } => write!(
+                f,
+                "fallo el emparejamiento con '{target}': {detail}\n-> Solucion: en el telefono, Opciones de desarrollador > Depuracion inalambrica > Emparejar con codigo, y usa el host:puerto y codigo que muestra."
             ),
             AdbError::CommandFailed { args, code, stderr } => {
                 let code = code.map(|c| c.to_string()).unwrap_or_else(|| "senal".into());
