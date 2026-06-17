@@ -17,10 +17,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config clang \
         libavcodec-dev libavformat-dev libavutil-dev libavdevice-dev \
         libswscale-dev libsdl2-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --no-log-init --uid 10001 builder
 
+# Compilar como usuario no-root (mínimo privilegio, ADR-0006). WORKDIR tras USER
+# crea /src con dueño builder, así cargo puede escribir target/.
+USER builder
 WORKDIR /src
-COPY client/ .
+COPY --chown=builder:builder client/ .
 # --locked: respeta Cargo.lock, build reproducible. El jar del server se embebe
 # en el binario; debe estar presente antes de este build (lo coloca la CI).
 RUN cargo build --release --locked

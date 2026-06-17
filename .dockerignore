@@ -2,6 +2,11 @@
 .git/
 client/target/
 client/.cargo-home/
+server/.gradle/
+server/.gradle-home/
+server/build/
+server/**/build/
+server/**/.kotlin/
 dist/
 out/
 *.log
