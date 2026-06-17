@@ -5,6 +5,15 @@
 //! explícita en big-endian (orden de red) para ser portable entre lenguajes.
 //!
 //! Ver `docs/protocol.md` para la especificación completa.
+//!
+//! # Contrato de I/O
+//!
+//! Las funciones de lectura usan `read_exact`, que **bloquea hasta completar**.
+//! El crate opera sobre cualquier `Read`/`Write` y no impone timeouts: es
+//! responsabilidad del caller configurar un deadline en el socket (p. ej.
+//! `TcpStream::set_read_timeout`). Sin timeout, un emisor lento o malicioso que
+//! manda bytes a cuentagotas puede colgar el hilo lector indefinidamente
+//! (slowloris). La capa de transporte (`skry-transport`) hace cumplir esto.
 
 pub mod codec;
 pub mod control;
@@ -12,7 +21,8 @@ pub mod error;
 pub mod gear;
 pub mod handshake;
 pub mod video;
-pub mod wire;
+
+mod wire;
 
 pub use codec::Codec;
 pub use control::{ClientMessage, ServerMessage, Telemetry};
@@ -94,6 +104,28 @@ mod tests {
         let (back, _) = read_frame(&mut &buf[..]).unwrap();
         assert!(back.config);
         assert!(!back.keyframe);
+    }
+
+    #[test]
+    fn write_frame_rejects_len_mismatch() {
+        // header.len no coincide con el payload: debe ser error explícito,
+        // no corrupción silenciosa del wire (antes era un debug_assert).
+        let header = FrameHeader {
+            pts: 0,
+            keyframe: false,
+            config: false,
+            len: 10,
+        };
+        let mut buf = Vec::new();
+        let err = write_frame(&mut buf, &header, &[1, 2, 3]).unwrap_err();
+        assert!(matches!(
+            err,
+            ProtoError::FrameLenMismatch {
+                header_len: 10,
+                payload_len: 3
+            }
+        ));
+        assert!(buf.is_empty(), "no debe escribir nada ante el error");
     }
 
     #[test]

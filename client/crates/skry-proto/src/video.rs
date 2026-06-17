@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 
 use crate::error::{ProtoError, Result};
-use crate::wire::{read_u32, read_u64, read_u8, write_u32, write_u64, write_u8};
+use crate::wire::{read_exact_buf, read_u32, read_u64, read_u8, write_u32, write_u64, write_u8};
 
 /// Tope de tamaño de un frame, para frenar lecturas absurdas ante corrupción.
 pub const MAX_FRAME_BYTES: u32 = 16 * 1024 * 1024;
@@ -71,17 +71,27 @@ impl FrameHeader {
 /// Lee un frame completo (cabecera + payload) en un `Vec<u8>` nuevo.
 ///
 /// Conveniencia para el receptor. El payload se acota por `MAX_FRAME_BYTES`
-/// dentro de `FrameHeader::read`, así que la reserva nunca es desmedida.
+/// dentro de `FrameHeader::read` antes de reservar, y la reserva usa
+/// `try_reserve` (ver [`read_exact_buf`]), de modo que un tamaño hostil produce
+/// un error con gracia en vez de abortar el proceso.
 pub fn read_frame<R: Read>(r: &mut R) -> Result<(FrameHeader, Vec<u8>)> {
     let header = FrameHeader::read(r)?;
-    let mut payload = vec![0u8; header.len as usize];
-    r.read_exact(&mut payload)?;
+    let payload = read_exact_buf(r, header.len as usize, "frame")?;
     Ok((header, payload))
 }
 
 /// Escribe un frame completo (cabecera + payload).
+///
+/// Valida en runtime que `header.len` coincida con el tamaño del payload: una
+/// discrepancia escribiría un frame corrupto en el wire, así que es un error
+/// explícito y no un `debug_assert` que desaparece en release.
 pub fn write_frame<W: Write>(w: &mut W, header: &FrameHeader, payload: &[u8]) -> Result<()> {
-    debug_assert_eq!(header.len as usize, payload.len());
+    if header.len as usize != payload.len() {
+        return Err(ProtoError::FrameLenMismatch {
+            header_len: header.len,
+            payload_len: payload.len(),
+        });
+    }
     header.write(w)?;
     w.write_all(payload)?;
     Ok(())

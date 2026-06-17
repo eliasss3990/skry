@@ -24,6 +24,11 @@ pub enum ProtoError {
     },
     /// Cadena UTF-8 inválida.
     InvalidUtf8,
+    /// Al escribir un frame, `header.len` no coincide con el tamaño del payload.
+    FrameLenMismatch { header_len: u32, payload_len: usize },
+    /// No se pudo reservar memoria para un buffer del tamaño declarado.
+    /// Convierte un fallo de asignación en un error con gracia en vez de abortar.
+    AllocFailed { kind: &'static str, bytes: usize },
 }
 
 impl fmt::Display for ProtoError {
@@ -44,6 +49,16 @@ impl fmt::Display for ProtoError {
                 write!(f, "longitud de {kind} fuera de rango: {len} (max {max})")
             }
             ProtoError::InvalidUtf8 => write!(f, "cadena UTF-8 invalida"),
+            ProtoError::FrameLenMismatch {
+                header_len,
+                payload_len,
+            } => write!(
+                f,
+                "header.len ({header_len}) no coincide con el payload ({payload_len})"
+            ),
+            ProtoError::AllocFailed { kind, bytes } => {
+                write!(f, "no se pudo reservar {bytes} bytes para {kind}")
+            }
         }
     }
 }

@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use crate::codec::Codec;
 use crate::error::{ProtoError, Result};
-use crate::wire::{read_string, read_u16, write_string, write_u16};
+use crate::wire::{read_string, read_u16, read_u8, write_string, write_u16, write_u8};
 use crate::{MAGIC, PROTOCOL_VERSION};
 
 /// Primer mensaje del canal de video: el server anuncia los parámetros
@@ -20,7 +20,7 @@ impl Handshake {
     pub fn write<W: Write>(&self, w: &mut W) -> Result<()> {
         w.write_all(&MAGIC)?;
         write_u16(w, PROTOCOL_VERSION)?;
-        crate::wire::write_u8(w, self.codec.to_u8())?;
+        write_u8(w, self.codec.to_u8())?;
         write_u16(w, self.width)?;
         write_u16(w, self.height)?;
         write_string(w, &self.device_name)?;
@@ -42,7 +42,7 @@ impl Handshake {
                 found: version,
             });
         }
-        let codec = Codec::from_u8(crate::wire::read_u8(r)?)?;
+        let codec = Codec::from_u8(read_u8(r)?)?;
         let width = read_u16(r)?;
         let height = read_u16(r)?;
         let device_name = read_string(r)?;

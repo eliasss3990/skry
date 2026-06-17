@@ -34,3 +34,16 @@ impl Codec {
         }
     }
 }
+
+impl From<Codec> for u8 {
+    fn from(c: Codec) -> u8 {
+        c.to_u8()
+    }
+}
+
+impl TryFrom<u8> for Codec {
+    type Error = ProtoError;
+    fn try_from(v: u8) -> Result<Codec> {
+        Codec::from_u8(v)
+    }
+}

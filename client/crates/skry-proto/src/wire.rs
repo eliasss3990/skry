@@ -73,9 +73,26 @@ pub fn write_string<W: Write>(w: &mut W, s: &str) -> Result<()> {
 
 pub fn read_string<R: Read>(r: &mut R) -> Result<String> {
     let len = read_u16(r)? as usize;
-    let mut buf = vec![0u8; len];
-    r.read_exact(&mut buf)?;
+    let buf = read_exact_buf(r, len, "string")?;
     String::from_utf8(buf).map_err(|_| ProtoError::InvalidUtf8)
+}
+
+/// Lee exactamente `len` bytes en un `Vec` nuevo, reservando con `try_reserve`.
+///
+/// Reservar el tamaño declarado de golpe es el antipatrón clásico de DoS por
+/// OOM: aquí `try_reserve` convierte un fallo de asignación en un error con
+/// gracia en vez de abortar el proceso. El caller debe haber acotado `len`
+/// contra el tope correspondiente antes de llamar (ver `MAX_FRAME_BYTES`,
+/// `MAX_STRING_BYTES`). Además, el caller debe imponer un timeout de lectura en
+/// el socket: `read_exact` sin deadline cuelga indefinidamente ante un emisor
+/// lento (slowloris).
+pub fn read_exact_buf<R: Read>(r: &mut R, len: usize, kind: &'static str) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(len)
+        .map_err(|_| ProtoError::AllocFailed { kind, bytes: len })?;
+    buf.resize(len, 0);
+    r.read_exact(&mut buf)?;
+    Ok(buf)
 }
 
 const _: () = assert!(MAX_STRING_BYTES <= u16::MAX as usize);

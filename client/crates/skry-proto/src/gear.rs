@@ -71,3 +71,16 @@ impl Gear {
         }
     }
 }
+
+impl From<Gear> for u8 {
+    fn from(g: Gear) -> u8 {
+        g.to_u8()
+    }
+}
+
+impl TryFrom<u8> for Gear {
+    type Error = ProtoError;
+    fn try_from(v: u8) -> Result<Gear> {
+        Gear::from_u8(v)
+    }
+}
