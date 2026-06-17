@@ -2,6 +2,7 @@
 /client/target/
 /client/.cargo-home/
 /client/target-win/
+/client/vcpkg_installed/
 **/*.rs.bk
 *.pdb
 
