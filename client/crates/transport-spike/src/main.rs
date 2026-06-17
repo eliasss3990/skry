@@ -7,11 +7,15 @@
 //!
 //! Vuelca los payloads a `skry-out.h265` para abrir con ffplay. Sin FFmpeg/SDL2:
 //! valida sólo que el stream fluye y se enmarca bien antes de meter decode/render.
+//!
+//! Imprime la salida del server (prefijo `[server]`) para diagnosticar fallos
+//! del lado del teléfono.
 
 use std::error::Error;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::TcpStream;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use skry_adb::Adb;
@@ -34,8 +38,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     let target = adb.resolve_target(None)?;
     println!("[transport-spike] dispositivo: {}", target.device().label());
 
-    // Lanzar el server en el teléfono.
+    // Lanzar el server y reenviar su salida con prefijo [server] para diagnóstico.
     let mut child = target.spawn_app_process(REMOTE_JAR, MAIN_CLASS, &[])?;
+    forward_child_output("server", child.stdout.take());
+    forward_child_output("server:err", child.stderr.take());
 
     // Forward del túnel (no requiere que el socket exista todavía).
     let port_str = target.forward("tcp:0", "localabstract:skry")?;
@@ -44,47 +50,63 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let result = stream_to_file(port);
 
-    // Limpieza best-effort, pase lo que pase con el stream.
+    // Limpieza best-effort: primero cortar el adb shell local, luego el remoto.
+    let _ = child.kill();
     let _ = target.kill_server(MAIN_CLASS);
     let _ = target.remove_forward(&format!("tcp:{port}"));
-    let _ = child.kill();
 
     result
 }
 
-/// Conecta reintentando: el server tarda en abrir el localabstract socket
-/// (arranque del JVM en app_process), así que el primer connect puede fallar.
-fn connect_with_retry(port: u16) -> Result<TcpStream, Box<dyn Error>> {
-    let deadline = Instant::now() + Duration::from_secs(8);
-    let mut last_err = None;
+/// Lanza un hilo que imprime, línea por línea, la salida de un stream del child.
+fn forward_child_output<R: Read + Send + 'static>(tag: &'static str, src: Option<R>) {
+    if let Some(src) = src {
+        thread::spawn(move || {
+            for line in BufReader::new(src).lines().map_while(Result::ok) {
+                println!("[{tag}] {line}");
+            }
+        });
+    }
+}
+
+/// Conecta + handshake reintentando: adb acepta la conexión local aunque el
+/// server aún no escuche el localabstract, así que el reintento debe abarcar el
+/// handshake completo, no sólo el connect.
+fn connect_and_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_err: Option<Box<dyn Error>> = None;
     while Instant::now() < deadline {
-        match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(s) => return Ok(s),
+        match try_handshake(port) {
+            Ok(pair) => return Ok(pair),
             Err(e) => {
                 last_err = Some(e);
-                std::thread::sleep(Duration::from_millis(300));
+                thread::sleep(Duration::from_millis(400));
             }
         }
     }
-    Err(format!("no se pudo conectar al server tras 8s: {last_err:?}").into())
+    Err(format!("el server no respondió el handshake en 10s: {last_err:?}").into())
+}
+
+fn try_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    StreamType::Video.write(&mut stream)?;
+    let handshake = Handshake::read(&mut stream)?;
+    Ok((stream, handshake))
 }
 
 fn stream_to_file(port: u16) -> Result<(), Box<dyn Error>> {
-    let mut stream = connect_with_retry(port)?;
+    let (mut stream, handshake) = connect_and_handshake(port)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-
-    // Declarar el canal como video (primer byte) y leer el handshake.
-    StreamType::Video.write(&mut stream)?;
-    let handshake = Handshake::read(&mut stream)?;
     println!(
-        "[transport-spike] handshake: {} {}x{} codec={}",
+        "[transport-spike] handshake OK: {} {}x{} codec={}",
         handshake.device_name,
         handshake.width,
         handshake.height,
         handshake.codec.as_str()
     );
 
-    let mut file = File::create(OUT_PATH)?;
+    let mut file = BufWriter::new(File::create(OUT_PATH)?);
     let mut frames = 0u64;
     let mut bytes = 0u64;
     let start = Instant::now();
@@ -103,6 +125,7 @@ fn stream_to_file(port: u16) -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    file.flush()?;
     println!("[transport-spike] OK: {frames} frames, {bytes} bytes -> {OUT_PATH}");
     Ok(())
 }
