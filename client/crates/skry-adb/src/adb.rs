@@ -300,7 +300,10 @@ mod tests {
     fn forward_tcp0_without_port_is_error() {
         // tcp:0 que no devuelve puerto numerico (solo ruido) debe ser error.
         let _g = stub_guard();
-        let t = stub_target("#!/bin/sh\nprintf '* daemon started successfully *\\n'\n", "fwd-noport");
+        let t = stub_target(
+            "#!/bin/sh\nprintf '* daemon started successfully *\\n'\n",
+            "fwd-noport",
+        );
         assert!(t.forward("tcp:0", "localabstract:skry").is_err());
     }
 
