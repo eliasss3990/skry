@@ -195,6 +195,34 @@ mod tests {
     }
 
     #[test]
+    fn max_length_string_round_trips() {
+        // Borde: un string en el máximo (MAX_STRING_BYTES = 65535) sobrevive el
+        // round-trip vía el prefijo de longitud u16.
+        let msg = "a".repeat(u16::MAX as usize);
+        let m = ServerMessage::Error {
+            code: 1,
+            message: msg,
+        };
+        let mut buf = Vec::new();
+        m.write(&mut buf).unwrap();
+        assert_eq!(ServerMessage::read(&mut &buf[..]).unwrap(), m);
+    }
+
+    #[test]
+    fn oversized_string_rejected_on_write() {
+        // Un string mayor al máximo no entra en el prefijo u16: error explícito.
+        let m = ServerMessage::Error {
+            code: 1,
+            message: "a".repeat(u16::MAX as usize + 1),
+        };
+        let mut buf = Vec::new();
+        assert!(matches!(
+            m.write(&mut buf),
+            Err(ProtoError::LengthExceeded { .. })
+        ));
+    }
+
+    #[test]
     fn unknown_tag_is_protocol_error() {
         let err = ClientMessage::read(&mut &[0xFFu8][..]).unwrap_err();
         assert!(matches!(err, ProtoError::UnknownDiscriminant { .. }));

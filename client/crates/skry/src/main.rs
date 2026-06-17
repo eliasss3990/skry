@@ -60,7 +60,9 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     forward_child_output("server:err", child.stderr.take());
 
     let port_str = target.forward("tcp:0", "localabstract:skry")?;
-    let port: u16 = port_str.parse()?;
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| format!("adb devolvió un puerto inválido: '{port_str}'"))?;
     eprintln!("[skry] forward tcp:{port} -> localabstract:skry");
 
     let result = mirror(port, cli.fullscreen);

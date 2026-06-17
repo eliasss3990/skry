@@ -15,7 +15,7 @@ una incógnita sin arrastrar las de los siguientes. Referencia: ADR-0002.
 
 ## Dispositivo de validación (confirmado)
 
-Samsung Galaxy S24 Ultra `SM-S928B`, serial `R5CY139AG4E`:
+Samsung Galaxy S24 Ultra `SM-S928B` (serial real omitido):
 
 - **Android 16** (`ro.build.version.release=16`), **API 36** (`sdk=36`).
 - **One UI 8** (`ro.build.version.oneui=80500`).

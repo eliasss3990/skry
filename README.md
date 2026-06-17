@@ -11,9 +11,15 @@ cualquier carpeta.
 skry
 ```
 
+> **Este README describe el diseño completo. Para lo que ya está construido vs.
+> planeado, ver la tabla de estado en
+> [docs/architecture.md](docs/architecture.md).** Lo marcado *(previsto)* abajo
+> es el objetivo, todavía no implementado.
+
 Con los defaults el sistema elige una configuración sensata según tu teléfono
-(tasa nativa del panel acotada a 60 FPS, H.265 si hay encoder por hardware,
-decode por GPU con fallback a CPU). Para forzar parámetros:
+(tasa nativa del panel acotada a 60 FPS, H.265 si hay encoder por hardware;
+decode por GPU con fallback a CPU *(previsto)*). Para forzar parámetros
+*(previsto — hoy el binario sólo expone `--serial` y `--fullscreen`)*:
 
 ```bash
 skry --gear 144 --codec h264 --hw-decode false --log-level debug
@@ -76,17 +82,23 @@ El toolchain de build está dockerizado para ser reproducible e idéntico a CI
 (ver [ADR-0004](docs/decisions/0004-build-docker-runtime-host.md)). El runtime
 corre nativo en tu host. Instrucciones en [docs/build.md](docs/build.md).
 
-## Cómo funciona
+## Cómo funciona (diseño)
 
-1. El cliente verifica el dispositivo por ADB, empuja un `.jar` efímero a
+1. El cliente verifica el dispositivo por ADB, despliega un `.jar` efímero a
    `/data/local/tmp/` y lo corre con `app_process` (no instala ninguna app).
+   *Hoy el jar se empuja a mano; embeberlo y empujarlo desde el binario está
+   previsto.*
 2. Cliente y server negocian capacidades y parámetros (handshake).
 3. El teléfono captura su pantalla, la codifica con MediaCodec y la envía.
-4. La PC decodifica y renderiza, ajustando la "marcha" de fluidez según la
-   estabilidad de la red y la térmica del teléfono.
+4. La PC decodifica y renderiza. El ajuste de "marcha" según red/térmica via el
+   canal de control está *previsto* (el protocolo ya lo soporta; falta cablearlo).
 
 Al cerrar el cliente, el proceso del teléfono muere y no quedan rastros
 persistentes.
+
+> **Validado en device** (captura + encode + transporte end-to-end, S24 Ultra /
+> Android 16): ver [docs/spikes.md](docs/spikes.md). El render propio (FFmpeg +
+> SDL2) y el build de Windows son el trabajo en curso.
 
 ## Licencia
 

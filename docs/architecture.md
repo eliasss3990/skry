@@ -122,6 +122,10 @@ Proyecto Gradle en `server/`. Produce `skry-server.jar`, que el cliente
 sesión y muere al cerrarse el cliente. Sin rastros persistentes — no porque
 "evada detección", sino porque no deja una app instalada en el teléfono.
 
+> **Estado**: hoy esto corre con los *spikes* de `server/spike/` (jar empujado a
+> mano), no con un `:app` productivo ni con el jar embebido en el binario. El
+> `include_bytes!` y el `push` automático están previstos (ver tabla de estado).
+
 Responsabilidades: capturar el framebuffer (hidden APIs de SurfaceControl/
 DisplayManager), codificar con MediaCodec según lo negociado en el handshake, y
 exponer los canales de control y video sobre el túnel ADB.
