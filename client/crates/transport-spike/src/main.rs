@@ -5,15 +5,20 @@
 //!   el forward y limpia al final.
 //! - `skry-proto`: declara el canal de video, lee el handshake y los frames.
 //!
-//! Vuelca los payloads a `skry-out.h265` para abrir con ffplay. Sin FFmpeg/SDL2:
-//! valida sólo que el stream fluye y se enmarca bien antes de meter decode/render.
+//! Por defecto vuelca los payloads a `skry-out.h265`. Con `--pipe`, escribe el
+//! H.265 crudo a stdout (logs a stderr) para reproducir EN VIVO con ffplay:
 //!
-//! Imprime la salida del server (prefijo `[server]`) para diagnosticar fallos
-//! del lado del teléfono.
+//! ```text
+//! transport-spike.exe --pipe | ffplay -f hevc -i -
+//! ```
+//!
+//! Sin FFmpeg/SDL2 propios: valida el transporte y permite ver el video usando
+//! ffplay como decoder/render provisorio. Reenvía la salida del server con
+//! prefijo `[server]` (a stderr) para diagnosticar fallos del teléfono.
 
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::net::TcpStream;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -24,21 +29,23 @@ use skry_proto::{read_frame, Handshake, StreamType};
 const REMOTE_JAR: &str = "/data/local/tmp/skry-spike.jar";
 const MAIN_CLASS: &str = "skry.spike.Spike3Main";
 const OUT_PATH: &str = "skry-out.h265";
-const CAPTURE_SECS: u64 = 10;
+// A archivo, captura acotada; en --pipe, hasta Ctrl-C o fin de stream.
+const FILE_CAPTURE_SECS: u64 = 10;
 
 fn main() {
-    if let Err(e) = run() {
+    let pipe = std::env::args().any(|a| a == "--pipe");
+    if let Err(e) = run(pipe) {
         eprintln!("[transport-spike] error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
+fn run(pipe: bool) -> Result<(), Box<dyn Error>> {
     let adb = Adb::new();
     let target = adb.resolve_target(None)?;
-    println!("[transport-spike] dispositivo: {}", target.device().label());
+    eprintln!("[transport-spike] dispositivo: {}", target.device().label());
 
-    // Lanzar el server y reenviar su salida con prefijo [server] para diagnóstico.
+    // Lanzar el server y reenviar su salida (a stderr) con prefijo [server].
     let mut child = target.spawn_app_process(REMOTE_JAR, MAIN_CLASS, &[])?;
     forward_child_output("server", child.stdout.take());
     forward_child_output("server:err", child.stderr.take());
@@ -46,9 +53,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     // Forward del túnel (no requiere que el socket exista todavía).
     let port_str = target.forward("tcp:0", "localabstract:skry")?;
     let port: u16 = port_str.parse()?;
-    println!("[transport-spike] forward tcp:{port} -> localabstract:skry");
+    eprintln!("[transport-spike] forward tcp:{port} -> localabstract:skry");
 
-    let result = stream_to_file(port);
+    let result = stream(port, pipe);
 
     // Limpieza best-effort: primero cortar el adb shell local, luego el remoto.
     let _ = child.kill();
@@ -58,19 +65,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     result
 }
 
-/// Lanza un hilo que imprime, línea por línea, la salida de un stream del child.
+/// Lanza un hilo que imprime (a stderr) la salida de un stream del child.
 fn forward_child_output<R: Read + Send + 'static>(tag: &'static str, src: Option<R>) {
     if let Some(src) = src {
         thread::spawn(move || {
             for line in BufReader::new(src).lines().map_while(Result::ok) {
-                println!("[{tag}] {line}");
+                eprintln!("[{tag}] {line}");
             }
         });
     }
 }
 
 /// Conecta + handshake reintentando: adb acepta la conexión local aunque el
-/// server aún no escuche el localabstract, así que el reintento debe abarcar el
+/// server aún no escuche el localabstract, así que el reintento abarca el
 /// handshake completo, no sólo el connect.
 fn connect_and_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -95,10 +102,10 @@ fn try_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
     Ok((stream, handshake))
 }
 
-fn stream_to_file(port: u16) -> Result<(), Box<dyn Error>> {
+fn stream(port: u16, pipe: bool) -> Result<(), Box<dyn Error>> {
     let (mut stream, handshake) = connect_and_handshake(port)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    println!(
+    eprintln!(
         "[transport-spike] handshake OK: {} {}x{} codec={}",
         handshake.device_name,
         handshake.width,
@@ -106,26 +113,41 @@ fn stream_to_file(port: u16) -> Result<(), Box<dyn Error>> {
         handshake.codec.as_str()
     );
 
-    let mut file = BufWriter::new(File::create(OUT_PATH)?);
+    // Destino del H.265: stdout (modo pipe, para ffplay) o archivo.
+    let mut sink: Box<dyn Write> = if pipe {
+        eprintln!("[transport-spike] modo pipe: enviando H.265 a stdout (Ctrl-C para cortar)");
+        Box::new(BufWriter::new(io::stdout()))
+    } else {
+        Box::new(BufWriter::new(File::create(OUT_PATH)?))
+    };
+
     let mut frames = 0u64;
     let mut bytes = 0u64;
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(CAPTURE_SECS) {
+    loop {
+        if !pipe && start.elapsed() >= Duration::from_secs(FILE_CAPTURE_SECS) {
+            break;
+        }
         match read_frame(&mut stream) {
             Ok((header, payload)) => {
-                file.write_all(&payload)?;
+                sink.write_all(&payload)?;
+                if pipe {
+                    // En vivo: vaciar para minimizar latencia hacia ffplay.
+                    sink.flush()?;
+                }
                 bytes += payload.len() as u64;
                 if !header.config {
                     frames += 1;
                 }
             }
             Err(e) => {
-                println!("[transport-spike] fin de stream: {e}");
+                eprintln!("[transport-spike] fin de stream: {e}");
                 break;
             }
         }
     }
-    file.flush()?;
-    println!("[transport-spike] OK: {frames} frames, {bytes} bytes -> {OUT_PATH}");
+    sink.flush()?;
+    let dest = if pipe { "stdout" } else { OUT_PATH };
+    eprintln!("[transport-spike] OK: {frames} frames, {bytes} bytes -> {dest}");
     Ok(())
 }
