@@ -26,6 +26,22 @@ scripts/dev bash                                         # shell en la imagen
 La imagen incluye las libs nativas (FFmpeg, SDL2) que requiere el crate de
 video, además de `clippy` y `rustfmt`.
 
+Todas las imágenes corren como **usuario no-root** (ADR-0006). `scripts/dev`
+además mapea tu uid para que los artefactos no queden root-owned.
+
+### Artefacto de release (Linux, multi-stage)
+
+`build/release.Dockerfile` es multi-stage: compila en un stage pesado y deja una
+imagen final limpia (sólo libs de runtime + binario, sin toolchain ni fuentes),
+que corre como usuario sin privilegios. Extraer sólo el binario:
+
+```bash
+docker build -f build/release.Dockerfile --target export --output type=local,dest=dist .
+# -> dist/skry
+```
+
+(Requiere que el `.jar` del server esté embebido; lo coloca la CI de release.)
+
 ### Binario de Windows
 
 No se cross-compila desde Linux (FFmpeg/SDL2 nativas lo hacen frágil). El binario

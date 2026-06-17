@@ -66,6 +66,7 @@ Resumen:
 | [0003](decisions/0003-defaults-conservadores.md) | Defaults conservadores (tasa nativa/60 FPS); 120/144 como opt-in | Aceptada |
 | [0004](decisions/0004-build-docker-runtime-host.md) | Build dockerizado y reproducible; runtime nativo en el host | Aceptada |
 | [0005](decisions/0005-inalambrico-y-local.md) | Operación inalámbrica (ADB sobre Wi-Fi) y 100% local, sin internet ni datos móviles | Aceptada |
+| [0006](decisions/0006-minimo-privilegio.md) | Mínimo privilegio (contenedores no-root, server como uid shell) y artefactos limpios (multi-stage) | Aceptada |
 
 ## Componentes
 

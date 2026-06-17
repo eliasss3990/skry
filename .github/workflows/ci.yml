@@ -23,14 +23,16 @@ jobs:
       - name: Construir imagen de build
         run: docker build -t skry-build-client:local -f build/client.Dockerfile .
 
+      # Usa el mismo wrapper que el desarrollo local: corre como usuario no-root
+      # (mapea el uid del runner) con CARGO_HOME local. Paridad exacta y sin root.
       - name: Formato
-        run: docker run --rm -v "$PWD/client":/work -w /work skry-build-client:local cargo fmt --check
+        run: scripts/dev cargo fmt --check
 
       - name: Clippy
-        run: docker run --rm -v "$PWD/client":/work -w /work skry-build-client:local cargo clippy --all-targets -- -D warnings
+        run: scripts/dev cargo clippy --all-targets -- -D warnings
 
       - name: Tests
-        run: docker run --rm -v "$PWD/client":/work -w /work skry-build-client:local cargo test
+        run: scripts/dev cargo test
 
   # Build y tests del cliente en Windows nativo (sin cross-compile, ADR-0004).
   # Las libs nativas (FFmpeg/SDL2) se instalan con vcpkg cuando el crate de video

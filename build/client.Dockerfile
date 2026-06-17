@@ -25,4 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Componentes de lint/formato dentro de la imagen (paridad con rust-toolchain.toml).
 RUN rustup component add clippy rustfmt
 
+# Mínimo privilegio: la imagen NO corre como root. El wrapper scripts/dev mapea
+# además el usuario del host (uid:gid) para que los artefactos en el volumen
+# montado no queden root-owned; este USER es la red de seguridad si se corre la
+# imagen sin ese mapeo (p. ej. en CI).
+RUN useradd --create-home --uid 10001 builder
+USER builder
+
 WORKDIR /work
