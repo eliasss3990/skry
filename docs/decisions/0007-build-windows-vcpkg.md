@@ -42,7 +42,7 @@ Alinear **ambas plataformas a FFmpeg 7.x** y `ffmpeg-next = "7"`:
    ```json
    { "name": "skry-client", "version": "0.1.0",
      "dependencies": [ { "name": "ffmpeg",
-       "features": ["avcodec","avformat","avutil","swscale","swresample"] } ] }
+       "features": ["avcodec","avformat","swscale","swresample"] } ] }
    ```
 3. `.github/workflows/ci.yml`, job `client-windows`: bootstrap vcpkg, cache de
    `C:\vcpkg\installed` (key por hash de `vcpkg.json`), `vcpkg install

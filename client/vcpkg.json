@@ -6,7 +6,7 @@
     {
       "name": "ffmpeg",
       "default-features": false,
-      "features": ["avcodec", "avformat", "avutil", "swscale", "swresample"]
+      "features": ["avcodec", "avformat", "swscale", "swresample"]
     }
   ]
 }

@@ -20,9 +20,10 @@ Reabrir la terminal. Luego vcpkg + FFmpeg (el primer build de FFmpeg tarda
 ```powershell
 git clone https://github.com/microsoft/vcpkg C:\vcpkg
 C:\vcpkg\bootstrap-vcpkg.bat
-C:\vcpkg\vcpkg install "ffmpeg[avcodec,avformat,avutil,swscale,swresample]:x64-windows-static-md"
+C:\vcpkg\vcpkg install "ffmpeg[avcodec,avformat,swscale,swresample]:x64-windows-static-md"
 ```
 
+(`avutil` no se lista: es el core de FFmpeg, vcpkg siempre lo construye.)
 El triplet `x64-windows-static-md` (libs estáticas, CRT dinámico) es el que
 combina con el linkeo MSVC por defecto de Rust.
 
