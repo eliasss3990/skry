@@ -67,6 +67,29 @@ ya resolvió Android 11→15, con el camino de arranque correcto de arriba. Aisl
 todo el acceso por reflexión tras una interfaz `ScreenCapture` con selección por
 `SDK_INT`, testeable con dobles; la integración real se valida en el device.
 
+### VALIDADO en el device (Spike 1, Android 16 / One UI 8 / API 36)
+
+Corrida real en el S24 Ultra (`SM-S928B`), 2026-06-17. Hechos confirmados:
+
+- **El camino que funciona** es `DisplayManager.createVirtualDisplay(String name,
+  int width, int height, int densityDpi, Surface surface)` — la sobrecarga
+  **estática**. Existe en API 36 y creó el virtual display (id 33, espejo del
+  físico 1440×3120) sin crash.
+- Un virtual display **sin** `VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY` **espeja la
+  pantalla principal por default**: por eso captura el contenido real sin pasar
+  un `displayIdToMirror` explícito.
+- **`SurfaceControl.createDisplay` / `createVirtualDisplay` NO existen** en esta
+  versión (confirmada la remoción).
+- **`Workarounds.fillConfigurationController()` NO fue necesario** en Android 16:
+  la captura funcionó como uid shell sin el fake ActivityThread. (En 12-14 podía
+  hacer falta; en 16 no.)
+- `DisplayManagerGlobal.getInstance().getDisplayInfo(0)` da el tamaño lógico
+  (`logicalWidth`/`logicalHeight`).
+- Captura a PNG vía `ImageReader`: frame de ~3 MB (contenido real, no negro).
+
+Esto es el camino de arranque confirmado para el módulo `:app`; los demás quedan
+como fallbacks para versiones más viejas.
+
 > Riesgo alto (R1-R3 del pre-mortem): la captura es el corazón del server y el
 > único device de validación (Samsung + One UI + Android 14/15) es de los más
 > hostiles para esta técnica — scrcpy tiene issues **abiertos sin fix** en este
