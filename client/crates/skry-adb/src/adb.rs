@@ -152,22 +152,28 @@ impl Target {
     }
 
     /// Crea un forward `tcp:<local_port>` → `<remote>` (ej. `localabstract:skry`).
-    /// Devuelve el puerto local efectivo (útil si se pidió `tcp:0`).
+    ///
+    /// Con `tcp:0`, adb asigna un puerto libre y lo imprime: se devuelve ese
+    /// puerto. Con un puerto explícito (`tcp:5555`), adb no imprime nada en
+    /// éxito y se devuelve cadena vacía. Se busca una línea **numérica** para
+    /// descartar ruido (mensajes del daemon, warnings de adb). Si se pidió
+    /// `tcp:0` y no se obtuvo puerto, es error explícito (no `""` silencioso).
     pub fn forward(&self, local: &str, remote: &str) -> Result<String> {
         let out = self.run_args(&["forward", local, remote])?;
-        // Si el daemon arranca en este comando, su mensaje precede al puerto;
-        // tomar la última línea no vacía descarta ese ruido.
-        let port = out.lines().rev().map(str::trim).find(|l| !l.is_empty());
-        match port {
-            Some(p) => Ok(p.to_string()),
-            // No devolver "" en silencio: el caller lo parsearía a puerto y
-            // fallaría sin contexto. Reportar el comando como fallido.
-            None => Err(AdbError::CommandFailed {
+        let port = out
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_digit()))
+            .unwrap_or("");
+        if local == "tcp:0" && port.is_empty() {
+            return Err(AdbError::CommandFailed {
                 args: vec!["forward".into(), local.into(), remote.into()],
                 code: None,
-                stderr: "adb forward no devolvio puerto".into(),
-            }),
+                stderr: "adb forward tcp:0 no devolvio puerto".into(),
+            });
         }
+        Ok(port.to_string())
     }
 
     /// Elimina un forward previamente creado.
@@ -280,6 +286,22 @@ mod tests {
         );
         let port = t.forward("tcp:0", "localabstract:skry").unwrap();
         assert_eq!(port, "39000");
+    }
+
+    #[test]
+    fn forward_explicit_port_empty_output_is_ok() {
+        // Con puerto explicito adb no imprime nada en exito: devolver "" sin error.
+        let _g = stub_guard();
+        let t = stub_target("#!/bin/sh\n", "fwd-explicit");
+        assert_eq!(t.forward("tcp:5555", "localabstract:skry").unwrap(), "");
+    }
+
+    #[test]
+    fn forward_tcp0_without_port_is_error() {
+        // tcp:0 que no devuelve puerto numerico (solo ruido) debe ser error.
+        let _g = stub_guard();
+        let t = stub_target("#!/bin/sh\nprintf '* daemon started successfully *\\n'\n", "fwd-noport");
+        assert!(t.forward("tcp:0", "localabstract:skry").is_err());
     }
 
     #[test]
