@@ -8,9 +8,14 @@ varias de sus ideas probadas, con una CLI propia, un sistema de "marchas" de
 fluidez y una estrategia de transporte extensible.
 
 > Alcance: espejado del **dispositivo propio del usuario**, autorizado vía
-> depuración USB de Android (ADB). No es una herramienta de acceso remoto a
-> dispositivos ajenos: requiere acceso físico y autorización explícita del
-> dueño del teléfono en la pantalla del propio dispositivo.
+> depuración de Android (ADB). No es una herramienta de acceso remoto a
+> dispositivos ajenos: requiere autorización explícita del dueño del teléfono en
+> la pantalla del propio dispositivo.
+>
+> Funciona **de forma inalámbrica** (ADB sobre Wi-Fi, teléfono a unos metros de
+> la PC, sin cable) y es **100% local**: el video viaja sólo por el enlace local
+> entre teléfono y PC, sin pasar por internet ni consumir datos móviles. Ver
+> [ADR-0005](decisions/0005-inalambrico-y-local.md).
 
 ## Panorama
 
@@ -60,6 +65,7 @@ Resumen:
 | [0002](decisions/0002-captura-surfacecontrol.md) | Captura via SurfaceControl/DisplayManager (no MediaProjection) por correr como uid shell | Aceptada |
 | [0003](decisions/0003-defaults-conservadores.md) | Defaults conservadores (tasa nativa/60 FPS); 120/144 como opt-in | Aceptada |
 | [0004](decisions/0004-build-docker-runtime-host.md) | Build dockerizado y reproducible; runtime nativo en el host | Aceptada |
+| [0005](decisions/0005-inalambrico-y-local.md) | Operación inalámbrica (ADB sobre Wi-Fi) y 100% local, sin internet ni datos móviles | Aceptada |
 
 ## Componentes
 

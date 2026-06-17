@@ -21,10 +21,14 @@ aceptación (igual enfoque que scrcpy).
 
 | Tipo | Tamaño | Notas |
 |------|--------|-------|
-| `u8` `u16` `u32` `u64` `i32` | 1/2/4/8/4 bytes | big-endian, sin signo salvo `i32` |
+| `u8` `u16` `u32` `u64` | 1/2/4/8 bytes | big-endian, sin signo |
 | `bool` | 1 byte | `0x00` = false, `0x01` = true |
-| `string` | `u16` longitud + N bytes | UTF-8, sin terminador nulo |
+| `string` | `u16` longitud + N bytes | **UTF-8 estándar** (no "Modified UTF-8"), sin terminador nulo |
 | `enum` | `u8` | discriminante; valores desconocidos = error de protocolo |
+
+Todos los enteros son **sin signo**. La sección
+[Notas de implementación para JVM/Kotlin](#notas-de-implementación-para-jvmkotlin)
+explica cómo manejarlos en un lenguaje sin tipos unsigned nativos.
 
 ## Handshake (canal de video, una vez al conectar)
 
@@ -73,6 +77,9 @@ ante corrupción; un `len` mayor es error de protocolo.
 | 0 (`0x01`) | `KEYFRAME` | el frame es un keyframe (IDR) |
 | 1 (`0x02`) | `CONFIG` | payload de configuración (SPS/PPS/VPS), no es frame visible |
 
+Los bits 2 a 7 están **reservados**: el emisor debe escribirlos en 0 y el
+receptor debe ignorarlos (compatibilidad hacia adelante).
+
 ## Canal de control (bidireccional)
 
 Mensajes con un *tag* `u8` inicial que identifica el tipo.
@@ -105,6 +112,37 @@ dos sentidos y facilita el debugging de capturas.
 | 0 | `Low` | 60 |
 | 1 | `Mid` | 120 |
 | 2 | `High` | 144 |
+
+## Notas de implementación para JVM/Kotlin
+
+El server corre en Android (Kotlin/Java), que **no tiene enteros sin signo
+nativos**. Reimplementar el wire sin estas convenciones produce bugs silenciosos
+que los tests con datos ASCII triviales no detectan.
+
+| Tipo wire | Leer en Kotlin | Escribir | Trampa que evita |
+|-----------|----------------|----------|------------------|
+| `u8` (flags, tag, enum) | `readUnsignedByte()` → `Int` | `writeByte(v)` | tags `0x81+` y el bit 7 vistos como negativos |
+| `u16` (version, w, h, code, strlen) | `readUnsignedShort()` → `Int` | `writeShort(v)`, validar `0..65535` | strlen ≥ 32768 leído negativo → buffer roto |
+| `u32` (len, bitrate, seq) | `readInt().toLong() and 0xFFFFFFFFL` | `writeInt(v.toInt())` | un `len` corrupto pasa el chequeo de rango con signo |
+| `u64` (pts, frames) | `readLong()` directo | `writeLong(v)` | el productor del `pts` debe garantizar valor no-negativo |
+| `string` | `readUnsignedShort` + `readFully` + `String(buf, UTF_8)` | `s.toByteArray(UTF_8)` + `writeShort(size)` + `write(bytes)` | **nunca `writeUTF`/`readUTF`** (usan Modified UTF-8, ≠ UTF-8) |
+| payload / magic | `readFully(buf)` | `write(buf)` | `read(buf)` parcial deja el framing corrupto sin error |
+
+Reglas adicionales:
+
+- **Endianness**: `DataInputStream`/`DataOutputStream` ya son big-endian. Si se
+  usa `ByteBuffer`, fijar `ByteOrder.BIG_ENDIAN` explícito.
+- **Validar en el lado lector**, igual que el cliente Rust: `len <= 16 MiB`
+  (frame) y `strlen <= 65535`, con el valor **ya ensanchado a `Long`/`Int` sin
+  signo**, antes de cualquier `ByteArray(...)`.
+- **UTF-8 inválido**: Rust lo rechaza; el `String(buf, UTF_8)` de Kotlin lo
+  reemplaza por U+FFFD silenciosamente. Para paridad estricta ("basura nunca se
+  interpreta como dato válido"), usar un decoder con `CodingErrorAction.REPORT`
+  y tratar el fallo como error de protocolo.
+- **`pts`**: basarlo en un epoch propio que arranca en 0 al iniciar la sesión,
+  no en `System.nanoTime()` crudo (que puede ser negativo).
+- El test `frame_rejects_oversized_len` del crate Rust es el primero a portar a
+  Kotlin para blindar el manejo de `len`.
 
 ## Versionado
 

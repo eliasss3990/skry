@@ -20,9 +20,12 @@ skry --gear 144 --codec h264 --hw-decode false --log-level debug
 ```
 
 > **Alcance**: `skry` espeja **tu propio dispositivo**, autorizado por vos vía
-> Depuración USB de Android. Requiere acceso físico al teléfono y tu
-> autorización explícita en la pantalla del propio dispositivo. No es una
-> herramienta de acceso a dispositivos ajenos.
+> Depuración de Android. Requiere tu autorización explícita en la pantalla del
+> propio teléfono. No es una herramienta de acceso a dispositivos ajenos.
+
+**Inalámbrico y sin datos.** `skry` funciona por Wi-Fi (teléfono a unos metros
+de la PC, sin cable) y es **100% local**: el video viaja sólo por tu red local,
+nunca por internet, sin consumir datos móviles ni pasar por ningún servidor.
 
 ## Estado
 
@@ -33,7 +36,9 @@ arquitectura.
 
 ## Requisitos
 
-- Un teléfono Android con **Depuración USB** activada.
+- Un teléfono Android con **Depuración** activada (USB o inalámbrica). En
+  Android 11+ la depuración inalámbrica se empareja por código, sin cable.
+- Teléfono y PC en la **misma red Wi-Fi local** (el router no necesita internet).
 - `adb` disponible (incluido en las Android Platform Tools).
 - En la PC: drivers de la GPU al día para decode por hardware (opcional; hay
   fallback a CPU).
