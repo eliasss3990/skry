@@ -1,6 +1,7 @@
 # Rust
 /client/target/
 /client/.cargo-home/
+/client/target-win/
 **/*.rs.bk
 *.pdb
 

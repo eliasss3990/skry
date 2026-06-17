@@ -1,0 +1,16 @@
+[package]
+name = "transport-spike"
+version = "0.1.0"
+description = "Spike 3 (cliente): valida el stream de skry sobre el túnel ADB usando skry-adb + skry-proto"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+skry-adb = { path = "../skry-adb" }
+skry-proto = { path = "../skry-proto" }
+
+[lints]
+workspace = true
