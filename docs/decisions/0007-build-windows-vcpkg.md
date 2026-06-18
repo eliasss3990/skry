@@ -1,72 +1,79 @@
 # ADR 0007: Build de Windows del cliente (FFmpeg vía vcpkg, SDL2 bundled)
 
-- Estado: Propuesta (plan para implementar con validación)
+- Estado: Aceptada (implementada y verde en CI, 2026-06-18)
 - Fecha: 2026-06-17
 
 ## Contexto
 
-El binario `skry` enlaza FFmpeg (decode) y SDL2 (render) a través de los crates
+El binario `skry` enlaza FFmpeg (decode) y SDL2 (render) vía los crates
 `ffmpeg-next` y `sdl2`. Per [ADR-0004](0004-build-docker-runtime-host.md), el
-binario de Windows se compila **nativo en CI** (runner `windows-latest`), no por
-cross-compile. Falta implementar ese job.
+binario de Windows se compila **nativo en CI** (`windows-latest`), no por
+cross-compile.
 
-El obstáculo central es la **alineación de versiones de FFmpeg** entre plataformas:
-- Linux (Debian bookworm en `build/client.Dockerfile`) trae FFmpeg **5.1** →
-  hoy `ffmpeg-next = "5.1.1"`.
-- vcpkg mainline en `windows-latest` provee FFmpeg **7.x**. Pinear vcpkg a 5.1
-  requiere un baseline viejo que arrastra TODO el registry a 2023 (SDL2 incluido)
-  sin parches — no conviene.
+El obstáculo que se temía era la **alineación de versiones de FFmpeg** (Linux
+tiene 5.1 de apt; vcpkg da 8.x). Resultó **más simple de lo previsto**: la crate
+`ffmpeg-next 8.x` compila contra un rango amplio de FFmpeg (4→8) detectando
+features por versión, así que **no hubo que tocar la base de Linux** — Linux
+sigue usando el FFmpeg 5.1 del sistema y Windows el 8.x de vcpkg, con la misma
+crate.
 
-`ffmpeg-next` debe matchear la major de FFmpeg en cada plataforma, pero es un
-único `Cargo.toml`: **ambas plataformas deben usar la misma major de FFmpeg.**
+## Decisión (cómo quedó implementado)
 
-## Decisión
+- **`ffmpeg-next = "8.1"`** en `skry-video`, target-specific:
+  - `cfg(windows)`: con feature **`static`** (hace que `ffmpeg-sys` busque el
+    triplet estático de vcpkg, no el dinámico).
+  - `cfg(not(windows))`: sin features (FFmpeg dinámico del sistema).
+- **FFmpeg en Windows**: vcpkg, triplet **`x64-windows-static-md`** (libs
+  estáticas, CRT dinámico — combina con el linkeo MSVC por defecto de Rust;
+  mezclar CRTs distintos es fuente de bugs, por eso `-md` y no `-static`).
+  `vcpkg.json` con `avcodec,avformat,swscale,swresample` (sin `avutil`, que es
+  core). Instalado en **modo clásico** (`C:\vcpkg\installed`) para que la crate
+  `vcpkg` de `ffmpeg-sys` lo descubra.
+- **SDL2 en Windows**: crate `sdl2` con **`bundled` + `static-link`** (compila
+  SDL desde fuente, estático) → un solo `.exe` sin DLLs al lado.
+- **Libs de sistema** (`skry-video/build.rs`, solo en Windows): el FFmpeg
+  estático necesita `strmiids` (DirectShow/avdevice), `ncrypt`/`crypt32`/
+  `secur32` (schannel-TLS de avformat), `shlwapi`, `mfplat`/`mfuuid`, etc. — la
+  discovery de vcpkg no las propaga al linker.
 
-Alinear **ambas plataformas a FFmpeg 7.x** y `ffmpeg-next = "7"`:
+### Variables de entorno del job (`windows-bin`)
 
-- **Windows**: FFmpeg 7 vía **vcpkg**, triplet **`x64-windows-static`** (binario
-  único sin DLLs al lado). SDL2 **no** por vcpkg: usar el crate `sdl2` con
-  features **`bundled` + `static-link`** (compila SDL2 desde fuente con
-  cmake/MSVC, ya presentes en el runner). Así vcpkg sólo provee FFmpeg.
-- **Linux** (build image): subir la base a una con FFmpeg 7 (Debian trixie o
-  compilar FFmpeg 7), de modo que `ffmpeg-next = "7"` compile también ahí.
+- `VCPKGRS_TRIPLET=x64-windows-static-md` (linkeo vía la crate vcpkg).
+- `BINDGEN_EXTRA_CLANG_ARGS=-IC:/vcpkg/installed/.../include` (bindgen no recibe
+  el include por la discovery; se lo pasamos explícito).
+- `LIBCLANG_PATH=C:\Program Files\LLVM\bin` (bindgen).
+- `CMAKE_POLICY_VERSION_MINIMUM=3.5` (CMake 4.x del runner rechaza el
+  `cmake_minimum_required` viejo del SDL2 bundled).
 
-### Cambios concretos
+### Estructura de CI
 
-1. `client/crates/skry-video/Cargo.toml`:
-   ```toml
-   ffmpeg-next = "7"
-   sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
-   ```
-2. `client/vcpkg.json` (nuevo, modo manifest):
-   ```json
-   { "name": "skry-client", "version": "0.1.0",
-     "dependencies": [ { "name": "ffmpeg",
-       "features": ["avcodec","avformat","swscale","swresample"] } ] }
-   ```
-3. `.github/workflows/ci.yml`, job `client-windows`: bootstrap vcpkg, cache de
-   `C:\vcpkg\installed` (key por hash de `vcpkg.json`), `vcpkg install
-   ffmpeg:x64-windows-static`, y `cargo {fmt,clippy,test,build --release -p skry}`
-   con `FFMPEG_DIR=C:\vcpkg\installed\x64-windows-static` y
-   `LIBCLANG_PATH=C:\Program Files\LLVM\bin` (bindgen de ffmpeg-next).
-4. `build/client.Dockerfile`: base con FFmpeg 7 (validar que el Linux verde no se
-   rompa ANTES de pushear — rebuild local de la imagen + `cargo build`).
+Dos jobs: `windows-ffmpeg` (instala FFmpeg vía vcpkg y lo **cachea** — es lo
+lento, ~25-40 min la primera vez) y `windows-bin` (`needs` el anterior, restaura
+el cache, compila `skry.exe` y lo sube como artefacto). El split evita rebuildear
+FFmpeg en cada iteración.
 
-### Tiempos
+## Escollos que aparecieron (lecciones)
 
-Primer build de vcpkg-FFmpeg: ~25-40 min; con `actions/cache` baja a ~5 min.
+1. **CMake 4.x** removió compatibilidad con `cmake_minimum_required < 3.5` → el
+   SDL2 bundled no configuraba. Fix: `CMAKE_POLICY_VERSION_MINIMUM=3.5`.
+2. **`avfft.h` removido en FFmpeg 8** → `ffmpeg-sys 7.x` lo incluía sí o sí y no
+   lo encontraba (fallback a `/usr/include`). Fix: subir a `ffmpeg-next 8.1`.
+3. **`VCPKGRS_DYNAMIC`**: sin el feature `static`, `ffmpeg-sys` busca el triplet
+   dinámico (`x64-windows`) en vez del estático instalado. Fix: feature `static`.
+4. **~55 unresolved externals** de libs de sistema del FFmpeg estático. Fix:
+   `build.rs` que las enlaza.
 
-## Por qué no se hizo ya
+## Pendiente / deuda
 
-Toca tres frentes a la vez (Cargo.toml, base de Linux, job de Windows) y el
-resultado final —un `.exe` que decodifica y rendererea— sólo se valida corriéndolo
-en una PC Windows con un teléfono. Hacerlo a ciegas arriesga romper el Linux verde
-o entregar un binario que no anda. Se implementa con validación: rebuild local de
-la imagen Linux para no romper CI, y prueba del `.exe` en el host del usuario.
+- **Pinear el commit de vcpkg** (hoy flota con el runner → la versión de FFmpeg
+  podría cambiar sin que el cache key —hash de `vcpkg.json`— lo note). Riesgo de
+  build "verde" con otra versión de FFmpeg.
+- **Job de release** que publique el `.exe` (y el binario Linux) en los tags: los
+  install scripts apuntan a releases que aún no se generan.
 
 ## Consecuencias
 
-- **Positivas**: un único `.exe` portable (static), versiones de FFmpeg alineadas
-  cross-platform, build reproducible en CI.
-- **Negativas**: subir la base de Linux a FFmpeg 7 es un cambio de imagen con su
-  propia verificación; el primer build de vcpkg es lento (mitigado con cache).
+- **Positivas**: un único `.exe` portable (estático), misma crate en ambas
+  plataformas sin tocar la base de Linux, build reproducible y cacheado en CI.
+- **Negativas**: vcpkg sin pinear (ver deuda); el primer build de FFmpeg es lento
+  (mitigado con cache).

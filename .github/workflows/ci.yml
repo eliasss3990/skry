@@ -94,6 +94,8 @@ jobs:
         with:
           path: C:\vcpkg\installed
           key: vcpkg-ffmpeg-static-md-${{ hashFiles('client/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-ffmpeg-static-md-
 
       - name: Cache de cargo
         uses: Swatinem/rust-cache@v2
@@ -113,7 +115,7 @@ jobs:
           # CMake 4.x removió la compatibilidad con minimums < 3.5; el SDL2 que
           # compila sdl2-sys (bundled) pide uno viejo. Esto le dice que lo tolere.
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
-        run: cargo build --release -p skry
+        run: cargo build --release --locked -p skry
 
       - name: Subir el binario
         if: success()
@@ -121,6 +123,26 @@ jobs:
         with:
           name: skry-windows-x64
           path: client/target/release/skry.exe
+
+  # Publica el binario como release al pushear un tag (vX.Y.Z). Es lo que
+  # consumen los install scripts (scripts/install.{sh,ps1}). Solo corre en tags.
+  release:
+    name: Release
+    needs: windows-bin
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: skry-windows-x64
+      - name: Nombrar el asset como esperan los install scripts
+        run: mv skry.exe skry-x86_64-pc-windows-msvc.exe
+      - name: Crear el GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: skry-x86_64-pc-windows-msvc.exe
 
   # Módulo Kotlin/JVM del server (protocolo). No necesita Android SDK; corre en
   # la imagen de gradle como usuario no-root. Valida la paridad del wire con Rust.
