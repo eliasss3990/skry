@@ -1,6 +1,13 @@
-//! Ventana de render con SDL2. Muestra frames YUV420 y maneja eventos
-//! (salir, alternar pantalla completa).
+//! Ventana de render con SDL2. Muestra frames YUV420P (camino software) o NV12
+//! (camino hardware, subido directo sin conversión) y maneja eventos (salir,
+//! alternar pantalla completa).
+//!
+//! NV12 se sube con `SDL_UpdateNVTexture` (FFI: el binding seguro de sdl2 0.37 no
+//! lo expone), pasando los planos Y/UV de FFmpeg sin copia intermedia. Por eso
+//! este módulo habilita `unsafe_code`, que el workspace deja en `warn`.
+#![allow(unsafe_code)]
 
+use ffmpeg_next::format::Pixel;
 use ffmpeg_next::frame::Video;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -23,7 +30,11 @@ pub struct Renderer {
     // junto al canvas sin caer en una estructura auto-referencial (patrón común
     // con sdl2-rust).
     _texture_creator: &'static TextureCreator<WindowContext>,
-    texture: Texture<'static>,
+    // La textura se crea con el primer frame, según su formato (IYUV o NV12).
+    texture: Option<Texture<'static>>,
+    tex_format: Option<PixelFormatEnum>,
+    width: u32,
+    height: u32,
     event_pump: sdl2::EventPump,
 }
 
@@ -59,36 +70,85 @@ impl Renderer {
         // alguna vez se instancian varios Renderer, esto acumula memoria.
         let texture_creator: &'static TextureCreator<WindowContext> =
             Box::leak(Box::new(canvas.texture_creator()));
-        let texture = texture_creator
-            .create_texture_streaming(PixelFormatEnum::IYUV, width, height)
-            .map_err(|e| e.to_string())?;
 
         let event_pump = sdl.event_pump()?;
 
         Ok(Self {
             canvas,
             _texture_creator: texture_creator,
-            texture,
+            texture: None,
+            tex_format: None,
+            width,
+            height,
             event_pump,
         })
     }
 
-    /// Sube el frame YUV420P a la textura y lo presenta (escalado a la ventana).
+    /// Sube el frame a la textura (NV12 o YUV420P, según el formato del frame) y
+    /// lo presenta escalado a la ventana.
     pub fn present(&mut self, frame: &Video) -> Result<(), String> {
-        self.texture
-            .update_yuv(
-                None,
-                frame.data(0),
-                frame.stride(0),
-                frame.data(1),
-                frame.stride(1),
-                frame.data(2),
-                frame.stride(2),
-            )
-            .map_err(|e| e.to_string())?;
+        let format = sdl_format(frame.format())?;
+        self.ensure_texture(format)?;
+        let texture = self.texture.as_mut().expect("textura creada arriba");
+
+        match format {
+            PixelFormatEnum::NV12 => {
+                let y_pitch = i32::try_from(frame.stride(0))
+                    .map_err(|_| "stride Y fuera de rango i32".to_string())?;
+                let uv_pitch = i32::try_from(frame.stride(1))
+                    .map_err(|_| "stride UV fuera de rango i32".to_string())?;
+                // SAFETY: SDL_UpdateNVTexture es síncrono y copia en el acto; los
+                // planos Y/UV de `frame` viven durante toda la llamada a present().
+                // El rect null = "toda la textura". SDL deriva la altura del UV del
+                // formato NV12, sólo necesita los pitches.
+                let ret = unsafe {
+                    sdl2::sys::SDL_UpdateNVTexture(
+                        texture.raw(),
+                        std::ptr::null(),
+                        frame.data(0).as_ptr(),
+                        y_pitch,
+                        frame.data(1).as_ptr(),
+                        uv_pitch,
+                    )
+                };
+                if ret != 0 {
+                    return Err(sdl2::get_error());
+                }
+            }
+            _ => {
+                // IYUV: tres planos Y/U/V.
+                texture
+                    .update_yuv(
+                        None,
+                        frame.data(0),
+                        frame.stride(0),
+                        frame.data(1),
+                        frame.stride(1),
+                        frame.data(2),
+                        frame.stride(2),
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
         self.canvas.clear();
-        self.canvas.copy(&self.texture, None, None)?;
+        self.canvas.copy(texture, None, None)?;
         self.canvas.present();
+        Ok(())
+    }
+
+    /// Crea (o recrea, si cambió el formato) la textura streaming del tamaño del
+    /// frame. En la práctica el formato es estable durante toda la sesión.
+    fn ensure_texture(&mut self, format: PixelFormatEnum) -> Result<(), String> {
+        if self.tex_format == Some(format) {
+            return Ok(());
+        }
+        let texture = self
+            ._texture_creator
+            .create_texture_streaming(format, self.width, self.height)
+            .map_err(|e| e.to_string())?;
+        self.texture = Some(texture);
+        self.tex_format = Some(format);
         Ok(())
     }
 
@@ -121,6 +181,19 @@ impl Renderer {
             _ => FullscreenType::Off,
         };
         let _ = window.set_fullscreen(next);
+    }
+}
+
+/// Mapea el formato de píxel de FFmpeg al de SDL. Solo soporta los dos caminos
+/// del decoder: YUV420P (software) y NV12 (hardware 8-bit).
+fn sdl_format(pixel: Pixel) -> Result<PixelFormatEnum, String> {
+    match pixel {
+        Pixel::YUV420P => Ok(PixelFormatEnum::IYUV),
+        Pixel::NV12 => Ok(PixelFormatEnum::NV12),
+        other => Err(format!(
+            "formato de píxel no soportado por el renderer: {other:?} \
+             (¿decode 10-bit HDR? hoy sólo NV12 8-bit y YUV420P)"
+        )),
     }
 }
 

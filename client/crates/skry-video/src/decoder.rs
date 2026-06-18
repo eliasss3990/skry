@@ -1,9 +1,11 @@
 //! Decodificación H.265/H.264 con FFmpeg.
 //!
 //! Intenta **decode por hardware** (D3D11VA en Windows, VAAPI en Linux) y cae a
-//! **software** si la GPU no está disponible. Con hw, el frame sale en memoria
-//! de GPU (NV12); se transfiere a memoria de sistema y se convierte a YUV420P
-//! con un scaler, así el renderer ve siempre YUV420P sin importar el camino.
+//! **software** si la GPU no está disponible. Con hw, el frame sale en memoria de
+//! GPU; se transfiere a memoria de sistema en su formato nativo (NV12) y se
+//! entrega tal cual — el renderer sube NV12 directo a la textura (sin pasada de
+//! conversión por CPU). El camino software entrega YUV420P. El renderer soporta
+//! ambos formatos.
 //!
 //! Este módulo usa FFI de FFmpeg para el hwaccel (no expuesto por ffmpeg-next),
 //! por eso habilita `unsafe_code` que el workspace deja en `warn` por defecto.
@@ -11,10 +13,7 @@
 
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use ffmpeg::format::Pixel;
 use ffmpeg::frame::Video;
-use ffmpeg::software::scaling::context::Context as Scaler;
-use ffmpeg::software::scaling::flag::Flags;
 use ffmpeg::{codec, ffi};
 use ffmpeg_next as ffmpeg;
 
@@ -40,12 +39,11 @@ impl std::fmt::Debug for DecodedFrame {
     }
 }
 
-/// Decoder de video que acepta los payloads del stream y entrega frames YUV420P.
+/// Decoder de video que acepta los payloads del stream y entrega frames listos
+/// para render (NV12 si vino del hardware, YUV420P si fue software).
 pub struct Decoder {
     decoder: ffmpeg::decoder::Video,
     hw_active: bool,
-    /// Conversor del formato de hardware (NV12) a YUV420P, creado al primer frame.
-    scaler: Option<Scaler>,
 }
 
 impl std::fmt::Debug for Decoder {
@@ -75,11 +73,7 @@ impl Decoder {
         }
 
         let decoder = context.decoder().open_as(codec)?.video()?;
-        Ok(Self {
-            decoder,
-            hw_active,
-            scaler: None,
-        })
+        Ok(Self { decoder, hw_active })
     }
 
     /// Decodifica un payload (con su pts en µs) y agrega los frames a `out`.
@@ -102,64 +96,43 @@ impl Decoder {
         let mut frame = Video::empty();
         while self.decoder.receive_frame(&mut frame).is_ok() {
             let pts_us = frame.pts().unwrap_or(0);
-            let yuv = self.make_yuv420p(&frame)?;
-            out.push(DecodedFrame { frame: yuv, pts_us });
+            let ready = self.to_system_frame(&frame)?;
+            out.push(DecodedFrame {
+                frame: ready,
+                pts_us,
+            });
         }
         Ok(())
     }
 
-    /// Devuelve el frame en YUV420P. Si vino de la GPU, lo transfiere a memoria
-    /// de sistema (queda en NV12) y lo convierte con el scaler.
-    fn make_yuv420p(&mut self, frame: &Video) -> Result<Video, ffmpeg::Error> {
+    /// Lleva el frame a memoria de sistema listo para render. Si vino de la GPU,
+    /// lo transfiere (queda en NV12, formato nativo del decode hw 8-bit) sin
+    /// convertir; el renderer sube NV12 directo. Software ya entrega YUV420P.
+    fn to_system_frame(&self, frame: &Video) -> Result<Video, ffmpeg::Error> {
         let hw_fmt = HW_PIX_FMT.load(Ordering::Relaxed);
         let frame_fmt: ffi::AVPixelFormat = frame.format().into();
         let is_hw = self.hw_active && (frame_fmt as i32) == hw_fmt;
 
-        let sw_frame = if is_hw {
-            // Transferir de GPU a memoria de sistema (formato nativo, p.ej. NV12).
-            let mut sw = Video::empty();
-            unsafe {
-                let ret = ffi::av_hwframe_transfer_data(sw.as_mut_ptr(), frame.as_ptr(), 0);
-                if ret < 0 {
-                    return Err(ffmpeg::Error::from(ret));
-                }
-                // av_hwframe_transfer_data no copia el pts; lo propagamos.
-                (*sw.as_mut_ptr()).pts = (*frame.as_ptr()).pts;
-            }
-            sw
-        } else {
-            frame.clone()
-        };
-
-        // Si ya es YUV420P (camino software típico), no convertir.
-        if sw_frame.format() == Pixel::YUV420P {
-            return Ok(sw_frame);
+        if !is_hw {
+            return Ok(frame.clone());
         }
 
-        // Convertir (NV12 u otro) -> YUV420P con un scaler reutilizable.
-        let (w, h) = (sw_frame.width(), sw_frame.height());
-        let scaler = self.get_scaler(sw_frame.format(), w, h)?;
-        let mut yuv = Video::empty();
-        scaler.run(&sw_frame, &mut yuv)?;
+        // Transferir de GPU a memoria de sistema (formato nativo, p.ej. NV12).
+        let mut sw = Video::empty();
+        // SAFETY: punteros válidos (frame vivo, sw recién creado). transfer_data
+        // asigna sw->format/width/height desde el source; fijamos dims explícito
+        // como red de seguridad ante implementaciones que no las copien.
         unsafe {
-            (*yuv.as_mut_ptr()).pts = (*sw_frame.as_ptr()).pts;
+            (*sw.as_mut_ptr()).width = (*frame.as_ptr()).width;
+            (*sw.as_mut_ptr()).height = (*frame.as_ptr()).height;
+            let ret = ffi::av_hwframe_transfer_data(sw.as_mut_ptr(), frame.as_ptr(), 0);
+            if ret < 0 {
+                return Err(ffmpeg::Error::from(ret));
+            }
+            // av_hwframe_transfer_data no copia el pts; lo propagamos.
+            (*sw.as_mut_ptr()).pts = (*frame.as_ptr()).pts;
         }
-        Ok(yuv)
-    }
-
-    fn get_scaler(&mut self, src: Pixel, w: u32, h: u32) -> Result<&mut Scaler, ffmpeg::Error> {
-        if self.scaler.is_none() {
-            self.scaler = Some(Scaler::get(
-                src,
-                w,
-                h,
-                Pixel::YUV420P,
-                w,
-                h,
-                Flags::BILINEAR,
-            )?);
-        }
-        Ok(self.scaler.as_mut().unwrap())
+        Ok(sw)
     }
 }
 
