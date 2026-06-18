@@ -32,11 +32,12 @@ public final class Spike3Main {
     private static final int PROTOCOL_VERSION = 1;
     private static final int CODEC_H265 = 1;
     private static final int STREAM_VIDEO = 0x00;
-    private static final int BITRATE = 8_000_000;
+    private static final int BITRATE = 20_000_000;
     private static final int FRAME_RATE = 60;
-    // Cap del lado más largo de la captura: reduce la carga de decode del cliente
-    // (software) y, a igual bitrate, mejora la calidad por píxel.
-    private static final int MAX_DIMENSION = 1600;
+    // Cap del lado más largo de la captura. Con decode por hardware en el cliente
+    // se puede ir a resolución completa; este cap alto no recorta un panel típico
+    // de teléfono (queda como red de seguridad para pantallas enormes).
+    private static final int MAX_DIMENSION = 4096;
     private static final long MAX_SESSION_NS = 60_000_000_000L; // corte de seguridad: 60 s
 
     public static void main(String[] args) {
