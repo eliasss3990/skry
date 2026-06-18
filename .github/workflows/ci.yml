@@ -77,9 +77,8 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: vcpkg install "ffmpeg[avcodec,avformat,swscale,swresample]:x64-windows-static-md"
 
-  # Binario de Windows del cliente `skry`. Restaura el FFmpeg cacheado, compila y
-  # sube el .exe como artefacto descargable. continue-on-error mientras se
-  # estabiliza el build nativo (no validable desde Linux); se quita al quedar verde.
+  # Binario de Windows del cliente `skry`. Restaura el FFmpeg cacheado, compila
+  # (FFmpeg vía vcpkg + SDL2 bundled) y sube el .exe como artefacto descargable.
   windows-bin:
     name: Binario Windows (skry)
     needs: windows-ffmpeg
