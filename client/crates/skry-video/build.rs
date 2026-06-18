@@ -14,7 +14,8 @@ fn main() {
             "mfplat",   // Media Foundation
             "mfuuid",   // Media Foundation GUIDs
             "ole32", "oleaut32", "user32", "gdi32", "ws2_32", // sockets
-            "advapi32", "shell32", "vfw32", // Video for Windows
+            "advapi32", "shell32", "vfw32",   // Video for Windows
+            "shlwapi", // SHCreateStreamOnFileA
             "psapi",
         ];
         for lib in system_libs {
