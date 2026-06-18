@@ -11,18 +11,19 @@ rust-version.workspace = true
 [dependencies]
 skry-proto = { path = "../skry-proto" }
 
-# ffmpeg-next 7.x detecta features por versión y compila contra un rango amplio
-# de FFmpeg. En Windows usa el de vcpkg con `static` (un solo .exe; el feature
-# hace que ffmpeg-sys busque el triplet estático, no el dinámico). En el resto,
-# el FFmpeg dinámico del sistema (apt).
+# ffmpeg-next 8.x compila contra un rango amplio de FFmpeg (4→8) detectando
+# features por versión: Windows usa el de vcpkg (FFmpeg 8) y Linux el del sistema
+# (apt 5.1), con la misma crate. La 8.x además ya no incluye el header removido
+# `avfft.h` (lo cual rompía con FFmpeg 8). En Windows va con `static` (un solo
+# .exe; el feature hace que ffmpeg-sys busque el triplet estático, no el dinámico).
 # SDL2: en Windows `bundled` + `static-link` (SDL desde fuente, estático). En el
 # resto, el SDL2 del sistema.
 [target.'cfg(windows)'.dependencies]
-ffmpeg-next = { version = "7.1", features = ["static"] }
+ffmpeg-next = { version = "8.1", features = ["static"] }
 sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
 
 [target.'cfg(not(windows))'.dependencies]
-ffmpeg-next = "7.1"
+ffmpeg-next = "8.1"
 sdl2 = "0.37"
 
 [lints]
