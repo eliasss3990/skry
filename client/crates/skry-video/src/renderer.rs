@@ -48,6 +48,10 @@ impl Renderer {
             .build()
             .map_err(|e| e.to_string())?;
 
+        // El Box::leak es INTENCIONAL y asume **un único Renderer por proceso**
+        // (es el caso de skry). El leak hace que el TextureCreator viva hasta el
+        // fin del proceso, así la `Texture<'static>` nunca queda colgada. Si
+        // alguna vez se instancian varios Renderer, esto acumula memoria.
         let texture_creator: &'static TextureCreator<WindowContext> =
             Box::leak(Box::new(canvas.texture_creator()));
         let texture = texture_creator

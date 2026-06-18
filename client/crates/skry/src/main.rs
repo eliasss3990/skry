@@ -115,7 +115,10 @@ fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
         }
         match rx.recv_timeout(Duration::from_millis(15)) {
             Ok((header, payload)) => {
-                decoder.decode(&payload, header.pts as i64, &mut frames)?;
+                // pts es u64; un valor > i64::MAX (≈292.000 años) es imposible
+                // en la práctica, pero hacemos el cap explícito en vez de truncar.
+                let pts = i64::try_from(header.pts).unwrap_or(i64::MAX);
+                decoder.decode(&payload, pts, &mut frames)?;
                 for decoded in frames.drain(..) {
                     clock.wait_for(decoded.pts_us);
                     renderer.present(&decoded.frame)?;
