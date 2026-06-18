@@ -29,6 +29,11 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(width: u32, height: u32, fullscreen: bool) -> Result<Self, String> {
+        // Escalado lineal (en vez de nearest): suaviza el redibujo del frame a la
+        // ventana, mucho mejor calidad visual. Debe setearse antes de crear la
+        // textura/renderer.
+        sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "1");
+
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
 
