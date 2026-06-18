@@ -36,8 +36,9 @@ public final class Spike3Main {
     private static final int FRAME_RATE = 60;
     // Cap por defecto del lado más largo de la captura (si el cliente no manda
     // uno). Capturar más resolución de la que el monitor del cliente puede mostrar
-    // sólo agrega trabajo (decode + transferencias) sin calidad visible.
-    private static final int DEFAULT_MAX_DIMENSION = 1600;
+    // sólo agrega trabajo (decode + transferencias) sin calidad visible. 2400 es
+    // el punto dulce medido: calidad casi full y ~100fps fluidos.
+    private static final int DEFAULT_MAX_DIMENSION = 2400;
     private static final long MAX_SESSION_NS = 60_000_000_000L; // corte de seguridad: 60 s
 
     public static void main(String[] args) {

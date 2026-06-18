@@ -55,7 +55,8 @@ struct Cli {
     /// Lado máximo de captura en px. Bajarlo reduce mucho el trabajo (decode +
     /// transferencias) y sube los fps; si el monitor no muestra más resolución que
     /// eso, no se pierde calidad visible. 0 = sin límite (panel completo).
-    #[arg(long, default_value_t = 1600)]
+    /// 2400 es el punto dulce medido: calidad casi full y ~100fps fluidos.
+    #[arg(long, default_value_t = 2400)]
     max_size: u32,
 }
 
