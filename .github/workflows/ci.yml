@@ -64,7 +64,6 @@ jobs:
   windows-ffmpeg:
     name: FFmpeg Windows (vcpkg)
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Cache de vcpkg (FFmpeg)
@@ -85,7 +84,6 @@ jobs:
     name: Binario Windows (skry)
     needs: windows-ffmpeg
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
