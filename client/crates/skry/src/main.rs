@@ -85,7 +85,7 @@ type LatestFrame = Arc<Mutex<Option<DecodedFrame>>>;
 
 /// Umbral de backlog para el catch-up: si el decoder junta más de estos payloads
 /// pendientes de una, está atrasado y salta al último keyframe disponible.
-const CATCHUP_BATCH: usize = 4;
+const CATCHUP_BATCH: usize = 8;
 
 /// Toma el lock recuperándolo si quedó envenenado por un panic de otro hilo. El
 /// dato protegido es un `Option<DecodedFrame>` trivialmente consistente, así que
@@ -206,10 +206,14 @@ fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
     // Desbloquear los hilos cerrando el socket y unirlos.
     let _ = stream.shutdown(Shutdown::Both);
     let _ = reader.join();
-    if let Ok(Err(e)) = decoder.join() {
-        return Err(e.into());
+    match decoder.join() {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e.into()),
+        Err(_) => {
+            eprintln!("[skry] el hilo decoder paniqueó");
+            Ok(())
+        }
     }
-    Ok(())
 }
 
 fn forward_child_output<R: Read + Send + 'static>(tag: &'static str, src: Option<R>) {

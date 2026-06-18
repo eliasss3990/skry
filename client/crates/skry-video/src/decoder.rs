@@ -143,6 +143,9 @@ unsafe extern "C" fn get_hw_format(
     _ctx: *mut ffi::AVCodecContext,
     mut fmts: *const ffi::AVPixelFormat,
 ) -> ffi::AVPixelFormat {
+    if fmts.is_null() {
+        return ffi::AVPixelFormat::AV_PIX_FMT_NONE;
+    }
     let want = HW_PIX_FMT.load(Ordering::Relaxed);
     let mut first = ffi::AVPixelFormat::AV_PIX_FMT_NONE;
     while unsafe { *fmts } != ffi::AVPixelFormat::AV_PIX_FMT_NONE {
@@ -194,7 +197,14 @@ unsafe fn try_init_hwaccel(ctx: *mut ffi::AVCodecContext) -> bool {
         }
         HW_PIX_FMT.store(hw_pix as i32, Ordering::Relaxed);
         unsafe {
-            (*ctx).hw_device_ctx = ffi::av_buffer_ref(hw_device_ctx);
+            // av_buffer_ref puede fallar (null) con memoria al límite: sin esto se
+            // instalaría get_format con hw_device_ctx null -> decode hw inválido.
+            let device_ref = ffi::av_buffer_ref(hw_device_ctx);
+            if device_ref.is_null() {
+                ffi::av_buffer_unref(&mut hw_device_ctx);
+                continue;
+            }
+            (*ctx).hw_device_ctx = device_ref;
             (*ctx).get_format = Some(get_hw_format);
             ffi::av_buffer_unref(&mut hw_device_ctx);
         }
