@@ -39,6 +39,11 @@ struct Cli {
     #[arg(long)]
     display: Option<usize>,
 
+    /// Desactivar vsync. Diagnóstico: si el present sube mucho sin vsync, el
+    /// cuello era el refresco; si no, es el trabajo por frame (subir el frame).
+    #[arg(long)]
+    no_vsync: bool,
+
     /// Ruta del jar del server en el dispositivo.
     #[arg(long, default_value = "/data/local/tmp/skry-spike.jar")]
     server_jar: String,
@@ -72,7 +77,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("adb devolvió un puerto inválido: '{port_str}'"))?;
     eprintln!("[skry] forward tcp:{port} -> localabstract:skry");
 
-    let result = mirror(port, cli.fullscreen, cli.display);
+    let result = mirror(port, cli.fullscreen, cli.display, cli.no_vsync);
 
     // Limpieza best-effort: cortar el adb shell local, matar el server remoto,
     // soltar el forward. No dejar el server huérfano consumiendo batería.
@@ -111,7 +116,12 @@ fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 ///   ve a menor fps pero **en tiempo real** (nunca cámara lenta acumulada).
 ///
 /// Cada segundo reporta `decode fps` vs `present fps` para diagnosticar el límite.
-fn mirror(port: u16, fullscreen: bool, display: Option<usize>) -> Result<(), Box<dyn Error>> {
+fn mirror(
+    port: u16,
+    fullscreen: bool,
+    display: Option<usize>,
+    no_vsync: bool,
+) -> Result<(), Box<dyn Error>> {
     let (stream, handshake) = connect_and_handshake(port)?;
     eprintln!(
         "[skry] {} {}x{} codec={}",
@@ -126,6 +136,7 @@ fn mirror(port: u16, fullscreen: bool, display: Option<usize>) -> Result<(), Box
         handshake.height as u32,
         fullscreen,
         display,
+        no_vsync,
     )?;
 
     // Hilo lector: socket -> canal de payloads.

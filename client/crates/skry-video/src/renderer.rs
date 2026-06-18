@@ -45,6 +45,7 @@ impl Renderer {
         height: u32,
         fullscreen: bool,
         display: Option<usize>,
+        no_vsync: bool,
     ) -> Result<Self, String> {
         // Escalado lineal (en vez de nearest): suaviza el redibujo del frame a la
         // ventana, mucho mejor calidad visual. Debe setearse antes de crear la
@@ -53,6 +54,16 @@ impl Renderer {
 
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
+
+        // Diagnóstico: listar monitores con su refresco para saber dónde conviene
+        // abrir (y verificar que --display caiga en el de mayor Hz).
+        if let Ok(n) = video.num_video_displays() {
+            for i in 0..n {
+                if let Ok(m) = video.desktop_display_mode(i) {
+                    eprintln!("[skry] monitor {i}: {}x{} @ {}Hz", m.w, m.h, m.refresh_rate);
+                }
+            }
+        }
 
         // Ventana a escala (manteniendo aspecto); el texture full-res se escala
         // al copiar. Evita abrir una ventana de 3120 px de alto.
@@ -76,11 +87,23 @@ impl Renderer {
         }
         let window = builder.build().map_err(|e| e.to_string())?;
 
-        let canvas = window
-            .into_canvas()
-            .present_vsync()
-            .build()
-            .map_err(|e| e.to_string())?;
+        // Reportar en qué monitor (y a qué Hz) quedó la ventana, y el vsync.
+        if let Ok(idx) = window.display_index() {
+            let hz = video
+                .desktop_display_mode(idx)
+                .map(|m| m.refresh_rate)
+                .unwrap_or(0);
+            eprintln!(
+                "[skry] ventana en monitor {idx} @ {hz}Hz | vsync={}",
+                !no_vsync
+            );
+        }
+
+        let mut canvas_builder = window.into_canvas();
+        if !no_vsync {
+            canvas_builder = canvas_builder.present_vsync();
+        }
+        let canvas = canvas_builder.build().map_err(|e| e.to_string())?;
 
         // El Box::leak es INTENCIONAL y asume **un único Renderer por proceso**
         // (es el caso de skry). El leak hace que el TextureCreator viva hasta el
