@@ -34,6 +34,9 @@ public final class Spike3Main {
     private static final int STREAM_VIDEO = 0x00;
     private static final int BITRATE = 8_000_000;
     private static final int FRAME_RATE = 60;
+    // Cap del lado más largo de la captura: reduce la carga de decode del cliente
+    // (software) y, a igual bitrate, mejora la calidad por píxel.
+    private static final int MAX_DIMENSION = 1600;
     private static final long MAX_SESSION_NS = 60_000_000_000L; // corte de seguridad: 60 s
 
     public static void main(String[] args) {
@@ -60,9 +63,15 @@ public final class Spike3Main {
                 return;
             }
 
-            int[] size = resolveDisplaySize();
+            // Escalar la captura para aliviar el decode (software) del cliente:
+            // un mirror a resolución reducida se decodifica mucho más rápido y,
+            // a igual bitrate, se ve mejor. El virtual display espeja la pantalla
+            // completa downscaleada a estas dimensiones.
+            int[] full = resolveDisplaySize();
+            int[] size = scaleDown(full[0], full[1], MAX_DIMENSION);
             int width = size[0];
             int height = size[1];
+            log("Display fisico " + full[0] + "x" + full[1] + " -> captura " + width + "x" + height);
 
             DataOutputStream out = new DataOutputStream(client.getOutputStream());
             // 2) Handshake: magic + version + codec + w + h + deviceName.
@@ -139,6 +148,18 @@ public final class Spike3Main {
         byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
         out.writeShort(bytes.length);
         out.write(bytes);
+    }
+
+    /** Escala (w,h) para que el lado más largo no supere maxDim, con dims pares. */
+    private static int[] scaleDown(int w, int h, int maxDim) {
+        int longest = Math.max(w, h);
+        if (longest <= maxDim) {
+            return new int[]{w, h};
+        }
+        double f = (double) maxDim / longest;
+        int nw = ((int) Math.round(w * f)) & ~1; // par (el encoder lo requiere)
+        int nh = ((int) Math.round(h * f)) & ~1;
+        return new int[]{Math.max(2, nw), Math.max(2, nh)};
     }
 
     private static int[] resolveDisplaySize() throws Exception {
