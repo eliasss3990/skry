@@ -51,6 +51,12 @@ struct Cli {
     /// Clase principal del server.
     #[arg(long, default_value = "skry.spike.Spike3Main")]
     main_class: String,
+
+    /// Lado máximo de captura en px. Bajarlo reduce mucho el trabajo (decode +
+    /// transferencias) y sube los fps; si el monitor no muestra más resolución que
+    /// eso, no se pierde calidad visible. 0 = sin límite (panel completo).
+    #[arg(long, default_value_t = 1600)]
+    max_size: u32,
 }
 
 fn main() {
@@ -67,7 +73,8 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     eprintln!("[skry] dispositivo: {}", target.device().label());
 
     // Lanzar el server y reenviar su salida (a stderr) para diagnóstico.
-    let mut child = target.spawn_app_process(&cli.server_jar, &cli.main_class, &[])?;
+    let server_args = [cli.max_size.to_string()];
+    let mut child = target.spawn_app_process(&cli.server_jar, &cli.main_class, &server_args)?;
     forward_child_output("server", child.stdout.take());
     forward_child_output("server:err", child.stderr.take());
 
