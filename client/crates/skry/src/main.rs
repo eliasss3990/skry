@@ -10,7 +10,9 @@
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read};
 use std::net::{Shutdown, TcpStream};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,7 +20,7 @@ use clap::Parser;
 
 use skry_adb::Adb;
 use skry_proto::{read_frame, FrameHeader, Handshake, StreamType};
-use skry_video::{Decoder, PresentationClock, Renderer};
+use skry_video::{DecodedFrame, Decoder, Renderer};
 
 /// Espejado de pantalla Android → PC, baja latencia, desde la terminal.
 #[derive(Parser, Debug)]
@@ -76,12 +78,34 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     result
 }
 
-/// Conecta el canal de video, lee el handshake y corre el lazo decode→present.
+/// Slot de un único frame: el decoder escribe el más nuevo (pisando el anterior)
+/// y el render lo consume. Es la pieza del **frame dropping**: si el render no da
+/// abasto, los frames intermedios se descartan y siempre se muestra el último.
+type LatestFrame = Arc<Mutex<Option<DecodedFrame>>>;
+
+/// Umbral de backlog para el catch-up: si el decoder junta más de estos payloads
+/// pendientes de una, está atrasado y salta al último keyframe disponible.
+const CATCHUP_BATCH: usize = 4;
+
+/// Toma el lock recuperándolo si quedó envenenado por un panic de otro hilo. El
+/// dato protegido es un `Option<DecodedFrame>` trivialmente consistente, así que
+/// un panic ajeno no debe tumbar al resto del pipeline.
+fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Conecta el canal de video, lee el handshake y corre el pipeline en 3 hilos.
 ///
-/// La lectura de la red corre en un hilo aparte que empuja frames por un canal;
-/// el hilo principal sólo decodifica, presenta y procesa eventos. Así el cierre
-/// (tecla Q / cerrar ventana) responde aunque no lleguen frames (pantalla
-/// estática), porque el principal nunca se bloquea leyendo de la red.
+/// Arquitectura (mirror en vivo, mínima latencia — NO reproducción de archivo):
+/// - **lector**: bloquea en `read_frame` y empuja payloads por un canal.
+/// - **decoder**: decodifica cada payload y deja el frame en un slot de uno solo,
+///   pisando el anterior. Decodificar es secuencial (H.265 referencia frames
+///   previos), así que no se puede saltear; el descarte ocurre en este slot.
+/// - **principal**: presenta SIEMPRE el último frame disponible y procesa eventos.
+///   Sin pacing por pts: se muestra apenas está listo. Si el decode se atrasa, se
+///   ve a menor fps pero **en tiempo real** (nunca cámara lenta acumulada).
+///
+/// Cada segundo reporta `decode fps` vs `present fps` para diagnosticar el límite.
 fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
     let (stream, handshake) = connect_and_handshake(port)?;
     eprintln!(
@@ -92,16 +116,12 @@ fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
         handshake.codec.as_str()
     );
 
-    let mut decoder = Decoder::new(handshake.codec)?;
     let mut renderer = Renderer::new(handshake.width as u32, handshake.height as u32, fullscreen)?;
-    let mut clock = PresentationClock::new();
-    let mut frames = Vec::new();
 
-    // Hilo lector: bloquea en read_frame y manda los frames por el canal.
+    // Hilo lector: socket -> canal de payloads.
     let (tx, rx) = mpsc::channel::<(FrameHeader, Vec<u8>)>();
     let mut reader_stream = stream.try_clone()?;
     let reader = thread::spawn(move || {
-        // Sale al cerrarse el stream (Err) o al cerrar el principal el canal.
         while let Ok(frame) = read_frame(&mut reader_stream) {
             if tx.send(frame).is_err() {
                 break;
@@ -109,34 +129,86 @@ fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
         }
     });
 
-    'main: loop {
+    // Hilo decoder: canal de payloads -> slot del último frame. Se crea el Decoder
+    // dentro del hilo (no necesita ser Send). Coalesce el backlog y, si está
+    // atrasado, salta al último keyframe para no arrastrar latencia.
+    let latest: LatestFrame = Arc::new(Mutex::new(None));
+    let recv_fps = Arc::new(AtomicU64::new(0));
+    let decoded_fps = Arc::new(AtomicU64::new(0));
+    let codec = handshake.codec;
+    let latest_dec = Arc::clone(&latest);
+    let recv_fps_dec = Arc::clone(&recv_fps);
+    let decoded_fps_dec = Arc::clone(&decoded_fps);
+    let decoder = thread::spawn(move || -> Result<(), String> {
+        let mut decoder = Decoder::new(codec).map_err(|e| e.to_string())?;
+        let mut frames = Vec::new();
+        while let Ok(first) = rx.recv() {
+            // Juntar todo lo que ya esté en el canal (no se puede saltear un payload
+            // suelto: H.265 referencia frames previos; sólo se salta a un keyframe).
+            let mut batch = vec![first];
+            while let Ok(more) = rx.try_recv() {
+                batch.push(more);
+            }
+            recv_fps_dec.fetch_add(batch.len() as u64, Ordering::Relaxed);
+
+            // Catch-up: con backlog real, arrancar desde el último keyframe (IDR
+            // autocontenido) y descartar lo anterior. Sin backlog se decodifica todo.
+            let start = if batch.len() > CATCHUP_BATCH {
+                batch.iter().rposition(|(h, _)| h.keyframe).unwrap_or(0)
+            } else {
+                0
+            };
+
+            for (header, payload) in batch.into_iter().skip(start) {
+                let pts = i64::try_from(header.pts).unwrap_or(i64::MAX);
+                decoder
+                    .decode(&payload, pts, &mut frames)
+                    .map_err(|e| e.to_string())?;
+                let n = frames.len() as u64;
+                if let Some(last) = frames.drain(..).last() {
+                    decoded_fps_dec.fetch_add(n, Ordering::Relaxed);
+                    *lock_recover(&latest_dec) = Some(last);
+                }
+            }
+        }
+        Ok(())
+    });
+
+    // Hilo principal: presentar el último frame + eventos + reporte de fps.
+    let mut present_fps = 0u64;
+    let mut last_report = Instant::now();
+    loop {
         if !renderer.pump() {
             break;
         }
-        match rx.recv_timeout(Duration::from_millis(15)) {
-            Ok((header, payload)) => {
-                // pts es u64; un valor > i64::MAX (≈292.000 años) es imposible
-                // en la práctica, pero hacemos el cap explícito en vez de truncar.
-                let pts = i64::try_from(header.pts).unwrap_or(i64::MAX);
-                decoder.decode(&payload, pts, &mut frames)?;
-                for decoded in frames.drain(..) {
-                    clock.wait_for(decoded.pts_us);
-                    renderer.present(&decoded.frame)?;
-                    if !renderer.pump() {
-                        break 'main;
-                    }
-                }
-            }
-            // Sin frames (pantalla estática): seguir procesando eventos.
-            Err(RecvTimeoutError::Timeout) => {}
-            // El server cerró el stream.
-            Err(RecvTimeoutError::Disconnected) => break,
+        // El decoder terminó (server caído, stream cerrado o error): salir en vez
+        // de quedar congelado mostrando el último frame para siempre.
+        if decoder.is_finished() {
+            break;
+        }
+        let frame = lock_recover(&latest).take();
+        if let Some(decoded) = frame {
+            renderer.present(&decoded.frame)?;
+            present_fps += 1;
+        } else {
+            // Nada nuevo: no quemar CPU haciendo spin.
+            thread::sleep(Duration::from_millis(2));
+        }
+        if last_report.elapsed() >= Duration::from_secs(1) {
+            let recv = recv_fps.swap(0, Ordering::Relaxed);
+            let dec = decoded_fps.swap(0, Ordering::Relaxed);
+            eprintln!("[skry] recibidos {recv} fps | decode {dec} fps | present {present_fps} fps");
+            present_fps = 0;
+            last_report = Instant::now();
         }
     }
 
-    // Desbloquear el hilo lector cerrando el socket y unirlo.
+    // Desbloquear los hilos cerrando el socket y unirlos.
     let _ = stream.shutdown(Shutdown::Both);
     let _ = reader.join();
+    if let Ok(Err(e)) = decoder.join() {
+        return Err(e.into());
+    }
     Ok(())
 }
 
