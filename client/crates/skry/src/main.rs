@@ -34,6 +34,11 @@ struct Cli {
     #[arg(long)]
     fullscreen: bool,
 
+    /// Monitor donde abrir la ventana (índice; 0 = principal). Útil para abrir
+    /// en un monitor de mayor refresco y conseguir más fps.
+    #[arg(long)]
+    display: Option<usize>,
+
     /// Ruta del jar del server en el dispositivo.
     #[arg(long, default_value = "/data/local/tmp/skry-spike.jar")]
     server_jar: String,
@@ -67,7 +72,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("adb devolvió un puerto inválido: '{port_str}'"))?;
     eprintln!("[skry] forward tcp:{port} -> localabstract:skry");
 
-    let result = mirror(port, cli.fullscreen);
+    let result = mirror(port, cli.fullscreen, cli.display);
 
     // Limpieza best-effort: cortar el adb shell local, matar el server remoto,
     // soltar el forward. No dejar el server huérfano consumiendo batería.
@@ -106,7 +111,7 @@ fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 ///   ve a menor fps pero **en tiempo real** (nunca cámara lenta acumulada).
 ///
 /// Cada segundo reporta `decode fps` vs `present fps` para diagnosticar el límite.
-fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
+fn mirror(port: u16, fullscreen: bool, display: Option<usize>) -> Result<(), Box<dyn Error>> {
     let (stream, handshake) = connect_and_handshake(port)?;
     eprintln!(
         "[skry] {} {}x{} codec={}",
@@ -116,7 +121,12 @@ fn mirror(port: u16, fullscreen: bool) -> Result<(), Box<dyn Error>> {
         handshake.codec.as_str()
     );
 
-    let mut renderer = Renderer::new(handshake.width as u32, handshake.height as u32, fullscreen)?;
+    let mut renderer = Renderer::new(
+        handshake.width as u32,
+        handshake.height as u32,
+        fullscreen,
+        display,
+    )?;
 
     // Hilo lector: socket -> canal de payloads.
     let (tx, rx) = mpsc::channel::<(FrameHeader, Vec<u8>)>();

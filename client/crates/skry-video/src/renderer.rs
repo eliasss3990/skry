@@ -12,6 +12,7 @@ use ffmpeg_next::frame::Video;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
+use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::video::{FullscreenType, Window, WindowContext};
 
@@ -39,7 +40,12 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(width: u32, height: u32, fullscreen: bool) -> Result<Self, String> {
+    pub fn new(
+        width: u32,
+        height: u32,
+        fullscreen: bool,
+        display: Option<usize>,
+    ) -> Result<Self, String> {
         // Escalado lineal (en vez de nearest): suaviza el redibujo del frame a la
         // ventana, mucho mejor calidad visual. Debe setearse antes de crear la
         // textura/renderer.
@@ -52,7 +58,19 @@ impl Renderer {
         // al copiar. Evita abrir una ventana de 3120 px de alto.
         let (win_w, win_h) = scaled_window(width, height);
         let mut builder = video.window("skry", win_w, win_h);
-        builder.position_centered().allow_highdpi();
+        builder.resizable().allow_highdpi();
+        // Posicionar en el monitor pedido (para usar uno de mayor refresco); si no
+        // se especifica o no existe, centrar en el principal.
+        match display.and_then(|i| video.display_bounds(i as i32).ok()) {
+            Some(bounds) => {
+                let x = bounds.x() + (bounds.width() as i32 - win_w as i32) / 2;
+                let y = bounds.y() + (bounds.height() as i32 - win_h as i32) / 2;
+                builder.position(x, y);
+            }
+            None => {
+                builder.position_centered();
+            }
+        }
         if fullscreen {
             builder.fullscreen_desktop();
         }
@@ -131,8 +149,13 @@ impl Renderer {
             }
         }
 
+        // Destino preservando la relación de aspecto del video: se escala al
+        // máximo que entra en la ventana y se centra (barras negras donde sobra).
+        // Nunca deforma — clave para un teléfono vertical en un monitor ancho.
+        let (win_w, win_h) = self.canvas.output_size()?;
+        let dst = fit_centered(self.width, self.height, win_w, win_h);
         self.canvas.clear();
-        self.canvas.copy(texture, None, None)?;
+        self.canvas.copy(texture, None, Some(dst))?;
         self.canvas.present();
         Ok(())
     }
@@ -197,10 +220,58 @@ fn sdl_format(pixel: Pixel) -> Result<PixelFormatEnum, String> {
     }
 }
 
+/// Rectángulo destino que mete (src_w x src_h) dentro de (win_w x win_h) al
+/// máximo posible sin deformar, centrado.
+fn fit_centered(src_w: u32, src_h: u32, win_w: u32, win_h: u32) -> Rect {
+    if src_w == 0 || src_h == 0 {
+        return Rect::new(0, 0, win_w.max(1), win_h.max(1));
+    }
+    // Punto fijo, sin floats. La dimensión que limita queda clavada al borde y la
+    // otra se deriva de ella con un solo truncado -> aspecto consistente.
+    let (dst_w, dst_h) = if win_w as u64 * src_h as u64 <= win_h as u64 * src_w as u64 {
+        // Limitado por ancho.
+        (win_w, (win_w as u64 * src_h as u64 / src_w as u64) as u32)
+    } else {
+        // Limitado por alto.
+        ((win_h as u64 * src_w as u64 / src_h as u64) as u32, win_h)
+    };
+    let x = (win_w as i32 - dst_w as i32) / 2;
+    let y = (win_h as i32 - dst_h as i32) / 2;
+    Rect::new(x, y, dst_w.max(1), dst_h.max(1))
+}
+
 fn scaled_window(width: u32, height: u32) -> (u32, u32) {
     if height <= DEFAULT_WINDOW_HEIGHT {
         return (width.max(1), height.max(1));
     }
     let w = (width as u64 * DEFAULT_WINDOW_HEIGHT as u64 / height as u64) as u32;
     (w.max(1), DEFAULT_WINDOW_HEIGHT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_centered;
+
+    #[test]
+    fn telefono_vertical_en_monitor_ancho_pone_barras_laterales() {
+        // 1440x3120 (vertical) en 1920x1080 (ancho): limitado por alto, centrado en x.
+        let r = fit_centered(1440, 3120, 1920, 1080);
+        assert_eq!(r.height(), 1080);
+        assert_eq!(r.width(), 498); // 1080 * 1440/3120
+        assert!(r.x() > 0);
+        assert_eq!(r.y(), 0);
+    }
+
+    #[test]
+    fn preserva_aspecto_sin_estirar() {
+        // aspecto 1:2 en una ventana cuadrada -> 500x1000, no 1000x1000.
+        let r = fit_centered(1000, 2000, 1000, 1000);
+        assert_eq!((r.width(), r.height()), (500, 1000));
+    }
+
+    #[test]
+    fn dimensiones_cero_no_paniquean() {
+        let r = fit_centered(0, 0, 800, 600);
+        assert_eq!((r.width(), r.height()), (800, 600));
+    }
 }
