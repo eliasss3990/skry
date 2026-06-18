@@ -59,11 +59,31 @@ jobs:
       - name: Tests (crates sin deps nativas)
         run: cargo test -p skry-proto -p skry-adb -p transport-spike
 
-  # Binario de Windows del cliente `skry` (con FFmpeg vía vcpkg + SDL2 bundled).
-  # Sube el .exe como artefacto descargable. continue-on-error mientras se
+  # FFmpeg via vcpkg en su propio job: es lo lento (~25 min). Cachea el resultado
+  # para que el job de compilación itere rápido sin rebuildearlo cada vez.
+  windows-ffmpeg:
+    name: FFmpeg Windows (vcpkg)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache de vcpkg (FFmpeg)
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-ffmpeg-static-md-${{ hashFiles('client/vcpkg.json') }}
+      # Modo clásico (desde la raíz, sin vcpkg.json en el cwd) -> C:\vcpkg\installed.
+      - name: FFmpeg vía vcpkg
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: vcpkg install "ffmpeg[avcodec,avformat,swscale,swresample]:x64-windows-static-md"
+
+  # Binario de Windows del cliente `skry`. Restaura el FFmpeg cacheado, compila y
+  # sube el .exe como artefacto descargable. continue-on-error mientras se
   # estabiliza el build nativo (no validable desde Linux); se quita al quedar verde.
   windows-bin:
     name: Binario Windows (skry)
+    needs: windows-ffmpeg
     runs-on: windows-latest
     continue-on-error: true
     steps:
@@ -72,16 +92,11 @@ jobs:
       - name: Toolchain Rust
         uses: dtolnay/rust-toolchain@1.83.0
 
-      - name: Cache de vcpkg (FFmpeg)
+      - name: Restaurar FFmpeg (vcpkg) del cache
         uses: actions/cache@v4
         with:
           path: C:\vcpkg\installed
           key: vcpkg-ffmpeg-static-md-${{ hashFiles('client/vcpkg.json') }}
-
-      # Modo clásico (desde la raíz, sin vcpkg.json en el cwd): instala en
-      # C:\vcpkg\installed, donde la crate vcpkg de ffmpeg-sys lo descubre.
-      - name: FFmpeg vía vcpkg
-        run: vcpkg install "ffmpeg[avcodec,avformat,swscale,swresample]:x64-windows-static-md"
 
       - name: Cache de cargo
         uses: Swatinem/rust-cache@v2
@@ -91,12 +106,11 @@ jobs:
       - name: Compilar skry (release)
         working-directory: client
         env:
-          VCPKG_ROOT: C:\vcpkg
-          VCPKGRS_TRIPLET: x64-windows-static-md
+          # Apuntar bindgen + linker al FFmpeg estático instalado por vcpkg.
+          FFMPEG_DIR: C:\vcpkg\installed\x64-windows-static-md
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
           # CMake 4.x removió la compatibilidad con minimums < 3.5; el SDL2 que
-          # compila sdl2-sys (bundled) pide uno viejo. Esto le dice a CMake que
-          # lo tolere.
+          # compila sdl2-sys (bundled) pide uno viejo. Esto le dice que lo tolere.
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --release -p skry
 

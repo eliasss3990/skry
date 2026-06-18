@@ -37,8 +37,8 @@ combina con el linkeo MSVC por defecto de Rust.
 git clone https://github.com/eliasss3990/skry C:\skry   # o donde prefieras
 cd C:\skry\client
 
-$env:VCPKG_ROOT = "C:\vcpkg"
-$env:VCPKGRS_TRIPLET = "x64-windows-static-md"
+# Apuntar bindgen + linker al FFmpeg estático de vcpkg:
+$env:FFMPEG_DIR = "C:\vcpkg\installed\x64-windows-static-md"
 $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin"
 # CMake 4.x quitó la compatibilidad con minimums < 3.5; el SDL2 bundled lo pide.
 $env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
