@@ -32,7 +32,7 @@ public final class Spike3Main {
     private static final int PROTOCOL_VERSION = 1;
     private static final int CODEC_H265 = 1;
     private static final int STREAM_VIDEO = 0x00;
-    private static final int BITRATE = 20_000_000;
+    private static final int BITRATE = 40_000_000;
     private static final int FRAME_RATE = 60;
     // Cap del lado más largo de la captura. Con decode por hardware en el cliente
     // se puede ir a resolución completa; este cap alto no recorta un panel típico
