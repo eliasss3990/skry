@@ -34,23 +34,33 @@ public final class Spike3Main {
     private static final int STREAM_VIDEO = 0x00;
     private static final int BITRATE = 40_000_000;
     private static final int FRAME_RATE = 60;
-    // Cap del lado más largo de la captura. Con decode por hardware en el cliente
-    // se puede ir a resolución completa; este cap alto no recorta un panel típico
-    // de teléfono (queda como red de seguridad para pantallas enormes).
-    private static final int MAX_DIMENSION = 4096;
+    // Cap por defecto del lado más largo de la captura (si el cliente no manda
+    // uno). Capturar más resolución de la que el monitor del cliente puede mostrar
+    // sólo agrega trabajo (decode + transferencias) sin calidad visible.
+    private static final int DEFAULT_MAX_DIMENSION = 1600;
     private static final long MAX_SESSION_NS = 60_000_000_000L; // corte de seguridad: 60 s
 
     public static void main(String[] args) {
         log("==== skry Spike 3 (server por socket) ====");
+        int maxDim = DEFAULT_MAX_DIMENSION;
+        if (args.length > 0) {
+            try {
+                int parsed = Integer.parseInt(args[0]);
+                // 0 (o negativo) = sin límite -> panel completo.
+                maxDim = parsed <= 0 ? Integer.MAX_VALUE : parsed;
+            } catch (NumberFormatException e) {
+                log("max-size invalido '" + args[0] + "', uso " + DEFAULT_MAX_DIMENSION);
+            }
+        }
         try {
-            serve();
+            serve(maxDim);
         } catch (Throwable t) {
             log("FALLO: " + t);
             t.printStackTrace();
         }
     }
 
-    private static void serve() throws Exception {
+    private static void serve(int maxDim) throws Exception {
         log("Escuchando en localabstract:" + SOCKET_NAME + " ...");
         try (LocalServerSocket server = new LocalServerSocket(SOCKET_NAME);
              LocalSocket client = server.accept()) {
@@ -69,7 +79,7 @@ public final class Spike3Main {
             // a igual bitrate, se ve mejor. El virtual display espeja la pantalla
             // completa downscaleada a estas dimensiones.
             int[] full = resolveDisplaySize();
-            int[] size = scaleDown(full[0], full[1], MAX_DIMENSION);
+            int[] size = scaleDown(full[0], full[1], maxDim);
             int width = size[0];
             int height = size[1];
             log("Display fisico " + full[0] + "x" + full[1] + " -> captura " + width + "x" + height);
