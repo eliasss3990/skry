@@ -40,6 +40,32 @@ construyen sobre el túnel ADB; ver [docs/architecture.md](docs/architecture.md)
 para el diseño y [docs/decisions/](docs/decisions/) para las decisiones de
 arquitectura.
 
+## App Android (sin cable, sin adb) *(en construcción)*
+
+Además del camino por `adb`, hay una **app Android nativa** (en `android-app/`)
+que captura con `MediaProjection` —un toque para autorizar, sin depuración ni
+cable— y sirve el mismo stream por la red local. La app se anuncia por mDNS
+(`_skry._tcp`) y, mientras transmite, muestra en pantalla a qué dirección
+conectar la PC.
+
+Flujo:
+
+1. En el teléfono: abrir skry, tocar **Iniciar captura** y aceptar el permiso.
+   La pantalla muestra `IP:7345`.
+2. En la PC: conectar directo a esa dirección, sin adb:
+
+   ```bash
+   skry --connect 192.168.1.50:7345
+   ```
+
+La app corre como servicio en primer plano (sobrevive a que pases a otra cosa en
+el teléfono) y avisa —sin instalar nada solo— cuando hay una versión nueva.
+
+> La **pantalla independiente** (`--new-display`) sigue por el camino `adb`: crear
+> una pantalla virtual con permiso para lanzar apps requiere privilegios que una
+> app normal no tiene. El descubrimiento mDNS desde el cliente (para no tipear la
+> IP) queda como mejora pendiente; hoy la dirección se pasa a mano.
+
 ## Requisitos
 
 - Un teléfono Android con **Depuración** activada (USB o inalámbrica). En
