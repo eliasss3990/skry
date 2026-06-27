@@ -260,7 +260,11 @@ fn mirror(
     // Hilo lector: socket -> canal de payloads.
     let (tx, rx) = mpsc::channel::<(FrameHeader, Vec<u8>)>();
     let mut reader_stream = stream.try_clone()?;
-    let reader = thread::spawn(move || {
+    // No se hace join de este hilo (ver el cierre de la función): podría quedar
+    // bloqueado en read() con la pantalla quieta, y en Windows el shutdown del
+    // socket no garantiza desbloquearlo. Se deja desacoplado para no colgar nunca
+    // el hilo de la ventana.
+    let _reader = thread::spawn(move || {
         while let Ok(frame) = read_frame(&mut reader_stream) {
             if tx.send(frame).is_err() {
                 break;
@@ -342,16 +346,26 @@ fn mirror(
         }
     };
 
-    // Desbloquear los hilos cerrando el socket y unirlos.
+    // Cerrar el socket para que los hilos corten.
     let _ = stream.shutdown(Shutdown::Both);
-    let _ = reader.join();
-    match decoder.join() {
-        Ok(Ok(())) => Ok(reason),
-        Ok(Err(e)) => Err(e.into()),
-        Err(_) => {
-            eprintln!("[skry] el hilo decoder paniqueó");
-            Ok(reason)
-        }
+
+    // El hilo principal (la ventana) NUNCA hace un join que pueda colgar: en
+    // Windows un read() bloqueado no se desbloquea de forma garantizada al cerrar
+    // el socket, así que esperar al lector congelaría la ventana ("no responde").
+    match reason {
+        // Cerrando el programa: no esperamos a nadie, el proceso termina ya y el
+        // SO recupera los hilos. Así cerrar la ventana es siempre instantáneo.
+        EndReason::UserQuit => Ok(reason),
+        // El stream terminó => el decoder ya finalizó (así lo detectamos): el join
+        // es inmediato y deja propagar un eventual error de decode.
+        EndReason::StreamEnded => match decoder.join() {
+            Ok(Ok(())) => Ok(reason),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => {
+                eprintln!("[skry] el hilo decoder paniqueó");
+                Ok(reason)
+            }
+        },
     }
 }
 
