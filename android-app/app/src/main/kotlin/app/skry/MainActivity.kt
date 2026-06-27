@@ -1,0 +1,232 @@
+package app.skry
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import app.skry.ui.theme.SkryTheme
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            SkryTheme {
+                SkryApp()
+            }
+        }
+    }
+}
+
+/** Modos de captura. El espejo replica el panel; "aparte" usa una pantalla virtual. */
+private val MODES = listOf("Espejo", "Pantalla aparte")
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SkryApp() {
+    // Estado local de UI (placeholder). La lógica real (MediaProjection, servicio,
+    // descubrimiento) se conecta en fases siguientes.
+    var capturing by remember { mutableStateOf(false) }
+    var mode by remember { mutableIntStateOf(0) }
+    // TODO(fase update-check): conectar al chequeo de releases de GitHub.
+    val updateAvailable by remember { mutableStateOf(false) }
+
+    Scaffold(
+        // "skry" en minúscula: es el nombre de marca, intencional.
+        topBar = { CenterAlignedTopAppBar(title = { Text("skry") }) },
+    ) { inner ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (updateAvailable) {
+                UpdateBanner()
+            }
+
+            StatusCard(capturing = capturing)
+
+            Text(
+                text = "Modo de captura",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                MODES.forEachIndexed { index, label ->
+                    SegmentedButton(
+                        selected = mode == index,
+                        onClick = { mode = index },
+                        shape = SegmentedButtonDefaults.itemShape(index, MODES.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            CaptureButton(capturing = capturing, onToggle = { capturing = !capturing })
+        }
+    }
+}
+
+@Composable
+private fun StatusCard(capturing: Boolean) {
+    val title = if (capturing) "Transmitiendo" else "Listo para transmitir"
+    val subtitle = if (capturing) {
+        "La PC está recibiendo tu pantalla"
+    } else {
+        "Tocá «Iniciar» y aceptá el permiso de captura"
+    }
+    val icon = if (capturing) Icons.Filled.CastConnected else Icons.Filled.Cast
+
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "$title. $subtitle" },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusIcon(icon)
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text(text = title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusIcon(icon: ImageVector) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.size(48.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CaptureButton(capturing: Boolean, onToggle: () -> Unit) {
+    Button(
+        onClick = onToggle,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+    ) {
+        Icon(
+            imageVector = if (capturing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+            contentDescription = if (capturing) "Detener captura" else "Iniciar captura",
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(if (capturing) "Detener" else "Iniciar captura")
+    }
+}
+
+@Composable
+private fun UpdateBanner() {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.SystemUpdate,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Hay una actualización disponible",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    text = "Descargala cuando quieras desde las releases",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            FilledTonalButton(onClick = { /* TODO: abrir la URL de la release */ }) { Text("Ver") }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun SkryAppPreview() {
+    SkryTheme {
+        SkryApp()
+    }
+}

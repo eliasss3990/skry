@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Wrapper para correr el toolchain de la app Android (Gradle + SDK) dentro de la
+# imagen de build dockerizada (ADR 0004 / 0008). Mapea el usuario del host para no
+# dejar artefactos root-owned, y cachea el GRADLE_USER_HOME en el repo (gitignored).
+#
+#   scripts/android gradle :app:assembleDebug
+#   scripts/android gradle tasks
+#   scripts/android bash                      # shell interactiva en la imagen
+#
+# Construye la imagen la primera vez si no existe.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE="skry-build-android:local"
+DOCKERFILE="$REPO_ROOT/build/android.Dockerfile"
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "[android] construyendo imagen $IMAGE (primera vez)..." >&2
+    docker build -t "$IMAGE" -f "$DOCKERFILE" "$REPO_ROOT"
+fi
+
+# Asigna TTY sólo si la sesión es interactiva (en CI/pipes no hay TTY).
+tty_flags=()
+if [ -t 0 ] && [ -t 1 ]; then
+    tty_flags=(-it)
+fi
+
+# GRADLE_USER_HOME local al repo (gitignored) para cachear deps entre corridas
+# sin tocar el home del host ni requerir permisos de root.
+# HOME=/work: al mapear --user el uid del host no tiene home en la imagen, así que
+# HOME caería en "/" (no escribible) y AGP falla al crear ~/.android. Apuntarlo al
+# árbol montado (gitignored) lo resuelve sin root.
+exec docker run --rm ${tty_flags[@]+"${tty_flags[@]}"} \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/work \
+    -e GRADLE_USER_HOME=/work/.gradle-home \
+    -v "$REPO_ROOT/android-app":/work \
+    -w /work \
+    "$IMAGE" "${@:-bash}"

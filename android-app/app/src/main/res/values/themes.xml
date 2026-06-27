@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema base (splash antes de que arranque Compose). Sin ActionBar; el
+         look real lo define Material 3 en Compose. DeviceDefault evita depender
+         de la librería Material Components en XML. -->
+    <style name="Theme.Skry" parent="android:Theme.DeviceDefault.NoActionBar" />
+</resources>

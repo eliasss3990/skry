@@ -1,0 +1,12 @@
+# Artefactos de build de Gradle/Android (no versionar).
+.gradle/
+.gradle-home/
+.android/
+.config/
+.java/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+.kotlin/

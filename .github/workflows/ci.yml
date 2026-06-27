@@ -161,3 +161,25 @@ jobs:
             -v "$PWD":/work -w /work \
             gradle:8.7-jdk21@sha256:afba668dbed80665ed2cee8b16010c51e9639be3424c3f897637701bdd89371b \
             ./gradlew :protocol:test --no-daemon
+
+  # App Android nativa (Kotlin/Compose, ADR 0008). Build del APK debug dentro de
+  # la imagen dockerizada (mismo wrapper que el desarrollo local). Sube el APK
+  # como artefacto. El runtime real es el teléfono; CI sólo valida que compila.
+  app-android:
+    name: App Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir imagen de build Android
+        run: docker build -t skry-build-android:local -f build/android.Dockerfile .
+
+      - name: Build APK debug
+        run: scripts/android gradle :app:assembleDebug
+
+      - name: Subir APK debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: skry-app-debug
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
