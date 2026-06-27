@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,6 +18,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import app.skry.capture.CaptureService
+import app.skry.update.UpdateChecker
+import app.skry.update.UpdateInfo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +50,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +86,12 @@ class MainActivity : ComponentActivity() {
 private fun SkryRoot() {
     val context = LocalContext.current
     var capturing by rememberSaveable { mutableStateOf(false) }
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
+
+    // Chequeo de actualización una vez al abrir: best-effort, sólo avisa.
+    LaunchedEffect(Unit) {
+        UpdateChecker.checkAsync(BuildConfig.VERSION_NAME) { update = it }
+    }
 
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -107,6 +117,14 @@ private fun SkryRoot() {
 
     SkryApp(
         capturing = capturing,
+        update = update,
+        onOpenUpdate = {
+            // runCatching: algunos dispositivos no tienen browser -> ACTION_VIEW
+            // tiraría ActivityNotFoundException y crashearía la app.
+            update?.let {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.url))) }
+            }
+        },
         onToggle = {
             if (capturing) {
                 context.startService(
@@ -141,10 +159,13 @@ private val MODES = listOf("Espejo", "Pantalla aparte")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SkryApp(capturing: Boolean, onToggle: () -> Unit) {
+fun SkryApp(
+    capturing: Boolean,
+    update: UpdateInfo?,
+    onOpenUpdate: () -> Unit,
+    onToggle: () -> Unit,
+) {
     var mode by remember { mutableIntStateOf(0) }
-    // TODO(fase update-check): conectar al chequeo de releases de GitHub.
-    val updateAvailable by remember { mutableStateOf(false) }
 
     Scaffold(
         // "skry" en minúscula: es el nombre de marca, intencional.
@@ -157,8 +178,8 @@ fun SkryApp(capturing: Boolean, onToggle: () -> Unit) {
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (updateAvailable) {
-                UpdateBanner()
+            if (update != null) {
+                UpdateBanner(version = update.version, onView = onOpenUpdate)
             }
 
             StatusCard(capturing = capturing)
@@ -263,7 +284,7 @@ private fun CaptureButton(capturing: Boolean, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun UpdateBanner() {
+private fun UpdateBanner(version: String, onView: () -> Unit) {
     Surface(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.tertiaryContainer,
@@ -281,7 +302,7 @@ private fun UpdateBanner() {
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Hay una actualización disponible",
+                    text = "Actualización disponible ($version)",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                 )
@@ -292,7 +313,7 @@ private fun UpdateBanner() {
                 )
             }
             Spacer(Modifier.width(12.dp))
-            FilledTonalButton(onClick = { /* TODO: abrir la URL de la release */ }) { Text("Ver") }
+            FilledTonalButton(onClick = onView) { Text("Ver") }
         }
     }
 }
@@ -301,6 +322,11 @@ private fun UpdateBanner() {
 @Composable
 private fun SkryAppPreview() {
     SkryTheme {
-        SkryApp(capturing = false, onToggle = {})
+        SkryApp(
+            capturing = false,
+            update = UpdateInfo("0.2.0", "https://example.com"),
+            onOpenUpdate = {},
+            onToggle = {},
+        )
     }
 }

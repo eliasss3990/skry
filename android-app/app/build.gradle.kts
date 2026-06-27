@@ -40,6 +40,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Expone BuildConfig.VERSION_NAME para el chequeo de actualizaciones.
+        buildConfig = true
     }
 }
 
