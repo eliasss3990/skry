@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import app.skry.capture.CaptureService
+import app.skry.net.LocalAddress
 import app.skry.update.UpdateChecker
 import app.skry.update.UpdateInfo
 import androidx.compose.foundation.layout.Arrangement
@@ -115,8 +116,14 @@ private fun SkryRoot() {
         requestProjection(context, projectionLauncher)
     }
 
+    // Dirección a la que conectar la PC mientras transmite (IP local : puerto).
+    val serverAddress = remember(capturing) {
+        if (capturing) LocalAddress.wifiIpv4()?.let { "$it:${CaptureService.PORT}" } else null
+    }
+
     SkryApp(
         capturing = capturing,
+        serverAddress = serverAddress,
         update = update,
         onOpenUpdate = {
             // runCatching: algunos dispositivos no tienen browser -> ACTION_VIEW
@@ -161,6 +168,7 @@ private val MODES = listOf("Espejo", "Pantalla aparte")
 @Composable
 fun SkryApp(
     capturing: Boolean,
+    serverAddress: String?,
     update: UpdateInfo?,
     onOpenUpdate: () -> Unit,
     onToggle: () -> Unit,
@@ -182,7 +190,7 @@ fun SkryApp(
                 UpdateBanner(version = update.version, onView = onOpenUpdate)
             }
 
-            StatusCard(capturing = capturing)
+            StatusCard(capturing = capturing, serverAddress = serverAddress)
 
             Text(
                 text = "Modo de captura",
@@ -209,12 +217,12 @@ fun SkryApp(
 }
 
 @Composable
-private fun StatusCard(capturing: Boolean) {
+private fun StatusCard(capturing: Boolean, serverAddress: String?) {
     val title = if (capturing) "Transmitiendo" else "Listo para transmitir"
-    val subtitle = if (capturing) {
-        "La PC está recibiendo tu pantalla"
-    } else {
-        "Tocá «Iniciar» y aceptá el permiso de captura"
+    val subtitle = when {
+        capturing && serverAddress != null -> "Conectá la PC a  $serverAddress"
+        capturing -> "La PC está recibiendo tu pantalla"
+        else -> "Tocá «Iniciar» y aceptá el permiso de captura"
     }
     val icon = if (capturing) Icons.Filled.CastConnected else Icons.Filled.Cast
 
@@ -323,7 +331,8 @@ private fun UpdateBanner(version: String, onView: () -> Unit) {
 private fun SkryAppPreview() {
     SkryTheme {
         SkryApp(
-            capturing = false,
+            capturing = true,
+            serverAddress = "192.168.1.50:7345",
             update = UpdateInfo("0.2.0", "https://example.com"),
             onOpenUpdate = {},
             onToggle = {},

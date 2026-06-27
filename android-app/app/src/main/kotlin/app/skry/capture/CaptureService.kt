@@ -114,7 +114,7 @@ class CaptureService : Service() {
             // en TIME_WAIT; sin esto el bind falla.
             val server = ServerSocket()
             server.reuseAddress = true
-            server.bind(java.net.InetSocketAddress(DEFAULT_PORT))
+            server.bind(java.net.InetSocketAddress(PORT))
             serverSocket = server
             nsd = NsdAdvertiser(this).also { it.register(server.localPort, serviceName()) }
             Log.i(TAG, "escuchando en :${server.localPort}")
@@ -249,7 +249,8 @@ class CaptureService : Service() {
         private const val TAG = "skry-capture"
         private const val CHANNEL_ID = "skry_capture"
         private const val NOTIF_ID = 1
-        private const val DEFAULT_PORT = 7345
+        /** Puerto TCP del servidor skry (lo usa el cliente con --connect IP:PUERTO). */
+        const val PORT = 7345
         private const val MAX_DIMENSION = 2400
         private const val JOIN_TIMEOUT_MS = 1500L
 
