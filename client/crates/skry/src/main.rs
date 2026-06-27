@@ -10,7 +10,7 @@
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read};
 use std::net::{Shutdown, TcpStream};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -204,6 +204,44 @@ type LatestFrame = Arc<Mutex<Option<DecodedFrame>>>;
 /// pendientes de una, está atrasado y salta al último keyframe disponible.
 const CATCHUP_BATCH: usize = 8;
 
+/// Cada cuánto el lector "despierta" para chequear el flag de parada (timeout del
+/// socket). Corto para cortar rápido al cerrar, sin busy-loop (el read bloquea
+/// hasta este tiempo antes de reintentar).
+const READ_POLL_TIMEOUT: Duration = Duration::from_millis(300);
+
+/// Lector cancelable: envuelve el socket (con read timeout) más un flag de parada.
+/// `read()` reintenta tras cada timeout mientras `stop` sea false; cuando el hilo
+/// principal pone `stop=true`, devuelve error y el lector corta. Clave en Windows:
+/// un `read()` bloqueado no se cancela de forma portable al cerrar el socket, así
+/// que sin esto el join del lector podía colgar la ventana. read_exact ve los
+/// reintentos como transparentes, así que el framing nunca se lee a medias.
+struct CancellableReader {
+    inner: TcpStream,
+    stop: Arc<AtomicBool>,
+}
+
+impl Read for CancellableReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if self.stop.load(Ordering::Acquire) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "lector detenido",
+                ));
+            }
+            match self.inner.read(buf) {
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    continue
+                }
+                other => return other,
+            }
+        }
+    }
+}
+
 /// Toma el lock recuperándolo si quedó envenenado por un panic de otro hilo. El
 /// dato protegido es un `Option<DecodedFrame>` trivialmente consistente, así que
 /// un panic ajeno no debe tumbar al resto del pipeline.
@@ -259,13 +297,17 @@ fn mirror(
 
     // Hilo lector: socket -> canal de payloads.
     let (tx, rx) = mpsc::channel::<(FrameHeader, Vec<u8>)>();
-    let mut reader_stream = stream.try_clone()?;
-    // No se hace join de este hilo (ver el cierre de la función): podría quedar
-    // bloqueado en read() con la pantalla quieta, y en Windows el shutdown del
-    // socket no garantiza desbloquearlo. Se deja desacoplado para no colgar nunca
-    // el hilo de la ventana.
-    let _reader = thread::spawn(move || {
-        while let Ok(frame) = read_frame(&mut reader_stream) {
+    // Lector cancelable: el socket lleva un timeout corto y un flag de parada, así
+    // el hilo principal puede pedir el corte y unir el hilo sin colgarse.
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader_stream = stream.try_clone()?;
+    reader_stream.set_read_timeout(Some(READ_POLL_TIMEOUT))?;
+    let mut cancellable = CancellableReader {
+        inner: reader_stream,
+        stop: Arc::clone(&stop),
+    };
+    let reader = thread::spawn(move || {
+        while let Ok(frame) = read_frame(&mut cancellable) {
             if tx.send(frame).is_err() {
                 break;
             }
@@ -346,26 +388,20 @@ fn mirror(
         }
     };
 
-    // Cerrar el socket para que los hilos corten.
+    // Parada cooperativa: el lector corta en <=READ_POLL_TIMEOUT y el decoder lo
+    // sigue al soltarse el canal. Los join quedan acotados, así que el hilo de la
+    // ventana no se cuelga en ninguna plataforma (Windows incluido) y no se filtran
+    // hilos entre reconexiones.
+    stop.store(true, Ordering::Release);
     let _ = stream.shutdown(Shutdown::Both);
-
-    // El hilo principal (la ventana) NUNCA hace un join que pueda colgar: en
-    // Windows un read() bloqueado no se desbloquea de forma garantizada al cerrar
-    // el socket, así que esperar al lector congelaría la ventana ("no responde").
-    match reason {
-        // Cerrando el programa: no esperamos a nadie, el proceso termina ya y el
-        // SO recupera los hilos. Así cerrar la ventana es siempre instantáneo.
-        EndReason::UserQuit => Ok(reason),
-        // El stream terminó => el decoder ya finalizó (así lo detectamos): el join
-        // es inmediato y deja propagar un eventual error de decode.
-        EndReason::StreamEnded => match decoder.join() {
-            Ok(Ok(())) => Ok(reason),
-            Ok(Err(e)) => Err(e.into()),
-            Err(_) => {
-                eprintln!("[skry] el hilo decoder paniqueó");
-                Ok(reason)
-            }
-        },
+    let _ = reader.join();
+    match decoder.join() {
+        Ok(Ok(())) => Ok(reason),
+        Ok(Err(e)) => Err(e.into()),
+        // Un panic del decoder (p. ej. fallo del hardware de video) se propaga como
+        // error: en --connect eso hace que connect_loop espere con backoff en vez de
+        // reconectar en loop apretado contra una falla que no se va a resolver sola.
+        Err(_) => Err("el hilo decoder paniqueó".into()),
     }
 }
 
