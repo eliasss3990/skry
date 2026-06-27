@@ -156,7 +156,10 @@ fn connect_loop(addr: &str, cli: &Cli) -> Result<(), Box<dyn Error>> {
                 thread::sleep(backoff);
             }
             Err(e) => {
-                eprintln!("[skry] sin conexión ({e}); reintento en {:.1}s", backoff.as_secs_f32());
+                eprintln!(
+                    "[skry] sin conexión ({e}); reintento en {:.1}s",
+                    backoff.as_secs_f32()
+                );
                 thread::sleep(backoff);
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
