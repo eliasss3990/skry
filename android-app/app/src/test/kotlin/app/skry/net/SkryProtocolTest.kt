@@ -48,6 +48,20 @@ class SkryProtocolTest {
     }
 
     @Test
+    fun frame_con_len_escribe_solo_los_bytes_validos() {
+        // Buffer reusado más grande que el frame: sólo se escriben los primeros len.
+        val scratch = byteArrayOf(0xAA.toByte(), 0xBB.toByte(), 0x00, 0x00, 0x00)
+        val out = bytes { SkryProtocol.writeFrame(it, 1L, 0, scratch, 2) }
+        val expected = byteArrayOf(
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // pts u64 = 1
+            0x00, // flags
+            0x00, 0x00, 0x00, 0x02, // len u32 = 2
+            0xAA.toByte(), 0xBB.toByte(), // sólo 2 bytes, no los 5
+        )
+        assertArrayEquals(expected, out)
+    }
+
+    @Test
     fun handshake_rechaza_dimension_fuera_de_u16() {
         assertThrows(IllegalArgumentException::class.java) {
             bytes { SkryProtocol.writeHandshake(it, SkryProtocol.CODEC_H265, 70000, 900, "x") }

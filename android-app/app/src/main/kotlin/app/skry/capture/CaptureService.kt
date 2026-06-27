@@ -29,6 +29,7 @@ import java.io.BufferedOutputStream
 import java.io.DataOutputStream
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Servicio foreground que captura la pantalla (MediaProjection), la codifica y la
@@ -98,6 +99,7 @@ class CaptureService : Service() {
         projection = mp
 
         running = true
+        isRunning.set(true)
         startServer()
         return START_NOT_STICKY
     }
@@ -153,8 +155,8 @@ class CaptureService : Service() {
             try {
                 encoder.start()
                 encoder.drain(
-                    onFrame = { pts, frameFlags, payload ->
-                        SkryProtocol.writeFrame(out, pts, frameFlags, payload)
+                    onFrame = { pts, frameFlags, payload, len ->
+                        SkryProtocol.writeFrame(out, pts, frameFlags, payload, len)
                     },
                     shouldStop = { !running || s.isClosed },
                 )
@@ -227,6 +229,7 @@ class CaptureService : Service() {
 
     private fun stopEverything() {
         running = false
+        isRunning.set(false)
         nsd?.unregister()
         nsd = null
         runCatching { serverSocket?.close() }
@@ -257,5 +260,12 @@ class CaptureService : Service() {
         const val ACTION_STOP = "app.skry.action.STOP"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "result_data"
+
+        /**
+         * Si el servicio está transmitiendo. Permite que la UI resincronice su
+         * estado al volver (el sistema puede matar el servicio sin matar el
+         * proceso, dejando la UI mostrando "transmitiendo" de mentira).
+         */
+        val isRunning = AtomicBoolean(false)
     }
 }

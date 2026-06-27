@@ -37,10 +37,18 @@ object SkryProtocol {
 
     /** Frame: pts(u64) + flags(u8) + len(u32) + payload. */
     fun writeFrame(out: DataOutputStream, ptsUs: Long, flags: Int, payload: ByteArray) {
+        writeFrame(out, ptsUs, flags, payload, payload.size)
+    }
+
+    /**
+     * Igual que el anterior pero escribe sólo los primeros [len] bytes de
+     * [payload]. Permite reusar un buffer más grande entre frames sin recortarlo.
+     */
+    fun writeFrame(out: DataOutputStream, ptsUs: Long, flags: Int, payload: ByteArray, len: Int) {
         out.writeLong(ptsUs)
         out.writeByte(flags)
-        out.writeInt(payload.size)
-        out.write(payload)
+        out.writeInt(len)
+        out.write(payload, 0, len)
         out.flush()
     }
 

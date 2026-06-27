@@ -17,6 +17,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import app.skry.capture.CaptureService
 import app.skry.net.LocalAddress
 import app.skry.update.UpdateChecker
@@ -92,6 +94,12 @@ private fun SkryRoot() {
     // Chequeo de actualización una vez al abrir: best-effort, sólo avisa.
     LaunchedEffect(Unit) {
         UpdateChecker.checkAsync(BuildConfig.VERSION_NAME) { update = it }
+    }
+
+    // Resincronizar al volver: el sistema puede haber matado el servicio sin
+    // matar el proceso; así la UI no miente diciendo "transmitiendo".
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        capturing = CaptureService.isRunning.get()
     }
 
     val projectionLauncher = rememberLauncherForActivityResult(

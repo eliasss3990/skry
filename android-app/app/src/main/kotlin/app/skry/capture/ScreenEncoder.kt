@@ -59,21 +59,24 @@ class ScreenEncoder(
      * Bloqueante: llamar desde un hilo dedicado.
      */
     fun drain(
-        onFrame: (ptsUs: Long, flags: Int, payload: ByteArray) -> Unit,
+        onFrame: (ptsUs: Long, flags: Int, payload: ByteArray, len: Int) -> Unit,
         shouldStop: () -> Boolean,
     ) {
         val c = codec ?: error("encoder no iniciado")
         val info = MediaCodec.BufferInfo()
+        // Buffer reusado entre frames: a 60fps evitar una asignación por frame
+        // ahorra presión de GC real. Crece sólo si un frame es más grande.
+        var scratch = ByteArray(0)
         while (!shouldStop()) {
             val idx = c.dequeueOutputBuffer(info, DEQUEUE_TIMEOUT_US)
             if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
             if (idx < 0) continue
             val buf = c.getOutputBuffer(idx)
             if (buf != null && info.size > 0) {
+                if (scratch.size < info.size) scratch = ByteArray(info.size)
                 buf.position(info.offset)
                 buf.limit(info.offset + info.size)
-                val payload = ByteArray(info.size)
-                buf.get(payload)
+                buf.get(scratch, 0, info.size)
 
                 var flags = 0
                 if (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0) {
@@ -82,7 +85,7 @@ class ScreenEncoder(
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
                     flags = flags or SkryProtocol.FLAG_CODEC_CONFIG
                 }
-                onFrame(info.presentationTimeUs, flags, payload)
+                onFrame(info.presentationTimeUs, flags, scratch, info.size)
             }
             c.releaseOutputBuffer(idx, false)
         }
