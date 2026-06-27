@@ -265,6 +265,10 @@ class CaptureService : Service() {
          * Si el servicio está transmitiendo. Permite que la UI resincronice su
          * estado al volver (el sistema puede matar el servicio sin matar el
          * proceso, dejando la UI mostrando "transmitiendo" de mentira).
+         *
+         * Vive en el proceso: si Android mata el proceso entero (OOM/forceStop)
+         * arranca de nuevo en false al relanzar — correcto. Dentro de un proceso
+         * vivo, onDestroy -> stopEverything es la única vía de terminación.
          */
         val isRunning = AtomicBoolean(false)
     }

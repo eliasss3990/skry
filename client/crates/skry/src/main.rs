@@ -151,8 +151,9 @@ fn connect_loop(addr: &str, cli: &Cli) -> Result<(), Box<dyn Error>> {
             Ok(EndReason::UserQuit) => return Ok(()),
             Ok(EndReason::StreamEnded) => {
                 eprintln!("[skry] stream cortado; reconectando a {addr}...");
+                // Reconexión exitosa previa: volver al backoff mínimo.
                 backoff = INITIAL_BACKOFF;
-                thread::sleep(INITIAL_BACKOFF);
+                thread::sleep(backoff);
             }
             Err(e) => {
                 eprintln!("[skry] sin conexión ({e}); reintento en {:.1}s", backoff.as_secs_f32());

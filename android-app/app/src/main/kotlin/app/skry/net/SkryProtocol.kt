@@ -45,6 +45,7 @@ object SkryProtocol {
      * [payload]. Permite reusar un buffer más grande entre frames sin recortarlo.
      */
     fun writeFrame(out: DataOutputStream, ptsUs: Long, flags: Int, payload: ByteArray, len: Int) {
+        require(len in 0..payload.size) { "len=$len fuera de rango [0, ${payload.size}]" }
         out.writeLong(ptsUs)
         out.writeByte(flags)
         out.writeInt(len)
