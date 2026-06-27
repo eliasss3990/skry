@@ -39,7 +39,6 @@ public final class Spike3Main {
     // sólo agrega trabajo (decode + transferencias) sin calidad visible. 2400 es
     // el punto dulce medido: calidad casi full y ~100fps fluidos.
     private static final int DEFAULT_MAX_DIMENSION = 2400;
-    private static final long MAX_SESSION_NS = 60_000_000_000L; // corte de seguridad: 60 s
 
     public static void main(String[] args) {
         log("==== skry Spike 3 (server por socket) ====");
@@ -117,10 +116,10 @@ public final class Spike3Main {
         log("Streaming. Cerra el cliente para terminar.");
 
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        long endNs = System.nanoTime() + MAX_SESSION_NS;
         long frames = 0;
         try {
-            while (System.nanoTime() < endNs) {
+            // Hasta que el cliente cierre (la escritura al socket tira IOException).
+            while (true) {
                 int idx = codec.dequeueOutputBuffer(info, 100_000);
                 if (idx < 0) {
                     continue;
