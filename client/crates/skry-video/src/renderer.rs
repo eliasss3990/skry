@@ -23,8 +23,12 @@ use sdl2::Sdl;
 /// Tras este tiempo sin mover el mouse, se esconde el puntero (como YouTube).
 const CURSOR_IDLE_HIDE: Duration = Duration::from_millis(2500);
 
-/// Alto máximo por defecto de la ventana (la pantalla del teléfono es vertical).
+/// Alto máximo por defecto de la ventana (fallback si no se puede leer el monitor).
 const DEFAULT_WINDOW_HEIGHT: u32 = 900;
+
+/// Fracción del área útil del monitor que ocupa la ventana al abrir. <1 deja un
+/// margen para barra de título y bordes, así nunca queda más grande que la pantalla.
+const WINDOW_MARGIN: f64 = 0.90;
 
 impl std::fmt::Debug for Renderer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -78,17 +82,38 @@ impl Renderer {
             }
         }
 
-        // Ventana a escala (manteniendo aspecto); el texture full-res se escala
-        // al copiar. Evita abrir una ventana de 3120 px de alto.
-        let (win_w, win_h) = scaled_window(width, height);
+        // Elegir monitor: el pedido (--display) o, por defecto, el de mayor
+        // resolución (normalmente el externo, no el panel chico del notebook).
+        // Antes abría en el primario, que podía ser el chico: la ventana quedaba
+        // más alta que la pantalla (recorte arriba/abajo) y el downscale fuerte se
+        // veía borroso.
+        let n = video.num_video_displays().unwrap_or(1).max(1) as usize;
+        let target = match display {
+            Some(i) if i < n => i,
+            Some(i) => {
+                eprintln!("[skry] monitor {i} no existe (hay {n}); uso el de mayor resolución");
+                best_display(&video)
+            }
+            None => best_display(&video),
+        };
+        let area = video
+            .display_usable_bounds(target as i32)
+            .or_else(|_| video.display_bounds(target as i32))
+            .ok();
+
+        // Tamaño de ventana: el mayor que entra en ~90% del área útil del monitor,
+        // preservando el aspecto del teléfono. Nunca más grande que la pantalla
+        // (evita el recorte), y lo más grande posible (evita el downscale borroso).
+        let (win_w, win_h) = match area {
+            Some(b) => window_size_for(width, height, b.width(), b.height()),
+            None => scaled_window(width, height),
+        };
         let mut builder = video.window("skry", win_w, win_h);
         builder.resizable().allow_highdpi();
-        // Posicionar en el monitor pedido (para usar uno de mayor refresco); si no
-        // se especifica o no existe, centrar en el principal.
-        match display.and_then(|i| video.display_bounds(i as i32).ok()) {
-            Some(bounds) => {
-                let x = bounds.x() + (bounds.width() as i32 - win_w as i32) / 2;
-                let y = bounds.y() + (bounds.height() as i32 - win_h as i32) / 2;
+        match area {
+            Some(b) => {
+                let x = b.x() + (b.width() as i32 - win_w as i32) / 2;
+                let y = b.y() + (b.height() as i32 - win_h as i32) / 2;
                 builder.position(x, y);
             }
             None => {
@@ -365,6 +390,32 @@ fn fill_centered(src_w: u32, src_h: u32, win_w: u32, win_h: u32) -> Rect {
     Rect::new(x, y, dst_w.max(1), dst_h.max(1))
 }
 
+/// Monitor con más píxeles: heurística de "el mejor". Suele ser el externo y no
+/// el panel chico del notebook. Abrir ahí por defecto evita el recorte y el
+/// downscale fuerte que se veían en una pantalla chica. Si algo falla, 0 (primario).
+fn best_display(video: &sdl2::VideoSubsystem) -> usize {
+    let n = video.num_video_displays().unwrap_or(1).max(1);
+    (0..n)
+        .max_by_key(|&i| {
+            video
+                .display_bounds(i)
+                .map(|b| u64::from(b.width()) * u64::from(b.height()))
+                .unwrap_or(0)
+        })
+        .unwrap_or(0) as usize
+}
+
+/// Tamaño de ventana = el mayor que entra en [WINDOW_MARGIN] de (avail_w, avail_h)
+/// preservando el aspecto del teléfono. Adaptarse al monitor real (no a un alto
+/// fijo) es lo que hace que se vea bien en CUALQUIER pantalla: nunca más grande
+/// que el monitor (no recorta) y lo más grande posible (no se ve borroso).
+fn window_size_for(phone_w: u32, phone_h: u32, avail_w: u32, avail_h: u32) -> (u32, u32) {
+    let max_w = (f64::from(avail_w) * WINDOW_MARGIN) as u32;
+    let max_h = (f64::from(avail_h) * WINDOW_MARGIN) as u32;
+    let r = fit_centered(phone_w.max(1), phone_h.max(1), max_w.max(1), max_h.max(1));
+    (r.width().max(1), r.height().max(1))
+}
+
 fn scaled_window(width: u32, height: u32) -> (u32, u32) {
     if height <= DEFAULT_WINDOW_HEIGHT {
         return (width.max(1), height.max(1));
@@ -413,6 +464,24 @@ mod tests {
     fn fill_aspecto_exacto_sin_recorte() {
         let r = super::fill_centered(1600, 900, 3200, 1800);
         assert_eq!((r.width(), r.height()), (3200, 1800));
+    }
+
+    #[test]
+    fn ventana_entra_en_monitor_chico_sin_recortar() {
+        // El bug: 1440x3120 en un monitor de 1536x864 abría a 900px de alto (más
+        // que la pantalla) -> recorte arriba/abajo. Ahora entra en 90% del alto.
+        let (w, h) = super::window_size_for(1440, 3120, 1536, 864);
+        assert!(h <= 864, "no debe superar el alto del monitor");
+        assert!(w <= 1536, "no debe superar el ancho del monitor");
+        assert_eq!(h, (864.0 * super::WINDOW_MARGIN) as u32); // limitado por alto
+    }
+
+    #[test]
+    fn ventana_aprovecha_monitor_grande() {
+        // En 2560x1440 la ventana es mucho mayor que la vieja (415x900): menos
+        // downscale, más nítido.
+        let (_w, h) = super::window_size_for(1440, 3120, 2560, 1440);
+        assert_eq!(h, (1440.0 * super::WINDOW_MARGIN) as u32);
     }
 
     #[test]
