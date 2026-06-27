@@ -273,14 +273,40 @@ public final class Spike3Main {
         return new int[]{Math.max(2, nw), Math.max(2, nh)};
     }
 
+    // Lado mínimo creíble para un panel real; por debajo asumimos lectura stale.
+    private static final int MIN_PLAUSIBLE_DIMENSION = 200;
+    private static final int DISPLAY_INFO_RETRIES = 10;
+    private static final long DISPLAY_INFO_RETRY_MS = 100;
+
+    /**
+     * Tamaño del panel. En la PRIMERA conexión tras un adb fresco, getDisplayInfo(0)
+     * a veces devuelve un tamaño por defecto chico antes de que el DisplayInfo esté
+     * poblado (de ahí el bug "primera corrida sale chica"). Reintentamos hasta que
+     * el valor sea creíble, logueando cada lectura para diagnóstico.
+     */
     private static int[] resolveDisplaySize() throws Exception {
         Class<?> dmgClass = Class.forName("android.hardware.display.DisplayManagerGlobal");
         Object dmg = dmgClass.getMethod("getInstance").invoke(null);
-        Object info = dmgClass.getMethod("getDisplayInfo", int.class).invoke(dmg, 0);
-        Class<?> infoClass = info.getClass();
-        int w = infoClass.getField("logicalWidth").getInt(info);
-        int h = infoClass.getField("logicalHeight").getInt(info);
-        return new int[]{w, h};
+        Method getDisplayInfo = dmgClass.getMethod("getDisplayInfo", int.class);
+
+        int w = 0;
+        int h = 0;
+        for (int attempt = 1; attempt <= DISPLAY_INFO_RETRIES; attempt++) {
+            Object info = getDisplayInfo.invoke(dmg, 0);
+            if (info != null) {
+                Class<?> infoClass = info.getClass();
+                w = infoClass.getField("logicalWidth").getInt(info);
+                h = infoClass.getField("logicalHeight").getInt(info);
+            }
+            log("getDisplayInfo intento " + attempt + ": " + w + "x" + h);
+            if (w > 0 && h > 0 && Math.max(w, h) >= MIN_PLAUSIBLE_DIMENSION) {
+                return new int[]{w, h};
+            }
+            Thread.sleep(DISPLAY_INFO_RETRY_MS);
+        }
+        // Agotados los reintentos: devolver lo último leído (mejor que fallar).
+        log("getDisplayInfo no se estabilizo; uso " + w + "x" + h);
+        return new int[]{Math.max(2, w), Math.max(2, h)};
     }
 
     private static Object createMirrorDisplay(String name, int w, int h, Surface surface) throws Exception {
