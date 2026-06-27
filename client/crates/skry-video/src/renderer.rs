@@ -11,6 +11,7 @@ use ffmpeg_next::format::Pixel;
 use ffmpeg_next::frame::Video;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::mouse::MouseButton;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture, TextureCreator};
@@ -115,6 +116,11 @@ impl Renderer {
         let texture_creator: &'static TextureCreator<WindowContext> =
             Box::leak(Box::new(canvas.texture_creator()));
 
+        eprintln!(
+            "[skry] controles: F o doble-click = pantalla completa | Esc = salir de \
+             pantalla completa | Z = llenar/entero | Q = salir"
+        );
+
         let event_pump = sdl.event_pump()?;
 
         Ok(Self {
@@ -218,8 +224,26 @@ impl Renderer {
                     keycode: Some(Keycode::Q),
                     ..
                 } => return false,
+                // Esc: como en YouTube, primero sale de pantalla completa; si ya
+                // estás en ventana, cierra.
+                Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => {
+                    if self.is_fullscreen() {
+                        self.exit_fullscreen();
+                    } else {
+                        return false;
+                    }
+                }
                 Event::KeyDown {
                     keycode: Some(Keycode::F),
+                    ..
+                } => self.toggle_fullscreen(),
+                // Doble click: alternar pantalla completa (igual que YouTube).
+                Event::MouseButtonDown {
+                    mouse_btn: MouseButton::Left,
+                    clicks: 2,
                     ..
                 } => self.toggle_fullscreen(),
                 Event::KeyDown {
@@ -239,6 +263,14 @@ impl Renderer {
             _ => FullscreenType::Off,
         };
         let _ = window.set_fullscreen(next);
+    }
+
+    fn is_fullscreen(&self) -> bool {
+        !matches!(self.canvas.window().fullscreen_state(), FullscreenType::Off)
+    }
+
+    fn exit_fullscreen(&mut self) {
+        let _ = self.canvas.window_mut().set_fullscreen(FullscreenType::Off);
     }
 }
 
