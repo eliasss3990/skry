@@ -44,6 +44,11 @@ struct Cli {
     #[arg(long)]
     no_vsync: bool,
 
+    /// Llenar la pantalla recortando lo que sobra (en vez de barras negras),
+    /// preservando la proporción. Se alterna en vivo con la tecla Z.
+    #[arg(long)]
+    fill: bool,
+
     /// Ruta del jar del server en el dispositivo.
     #[arg(long, default_value = "/data/local/tmp/skry-spike.jar")]
     server_jar: String,
@@ -85,7 +90,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("adb devolvió un puerto inválido: '{port_str}'"))?;
     eprintln!("[skry] forward tcp:{port} -> localabstract:skry");
 
-    let result = mirror(port, cli.fullscreen, cli.display, cli.no_vsync);
+    let result = mirror(port, cli.fullscreen, cli.display, cli.no_vsync, cli.fill);
 
     // Limpieza best-effort: cortar el adb shell local, matar el server remoto,
     // soltar el forward. No dejar el server huérfano consumiendo batería.
@@ -129,6 +134,7 @@ fn mirror(
     fullscreen: bool,
     display: Option<usize>,
     no_vsync: bool,
+    fill: bool,
 ) -> Result<(), Box<dyn Error>> {
     let (stream, handshake) = connect_and_handshake(port)?;
     eprintln!(
@@ -145,6 +151,7 @@ fn mirror(
         fullscreen,
         display,
         no_vsync,
+        fill,
     )?;
 
     // Hilo lector: socket -> canal de payloads.

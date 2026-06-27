@@ -36,6 +36,8 @@ pub struct Renderer {
     tex_format: Option<PixelFormatEnum>,
     width: u32,
     height: u32,
+    // true = llenar la ventana recortando el sobrante; false = entrar entero con barras.
+    fill: bool,
     event_pump: sdl2::EventPump,
 }
 
@@ -46,6 +48,7 @@ impl Renderer {
         fullscreen: bool,
         display: Option<usize>,
         no_vsync: bool,
+        fill: bool,
     ) -> Result<Self, String> {
         // Escalado lineal (en vez de nearest): suaviza el redibujo del frame a la
         // ventana, mucho mejor calidad visual. Debe setearse antes de crear la
@@ -121,6 +124,7 @@ impl Renderer {
             tex_format: None,
             width,
             height,
+            fill,
             event_pump,
         })
     }
@@ -176,7 +180,11 @@ impl Renderer {
         // máximo que entra en la ventana y se centra (barras negras donde sobra).
         // Nunca deforma — clave para un teléfono vertical en un monitor ancho.
         let (win_w, win_h) = self.canvas.output_size()?;
-        let dst = fit_centered(self.width, self.height, win_w, win_h);
+        let dst = if self.fill {
+            fill_centered(self.width, self.height, win_w, win_h)
+        } else {
+            fit_centered(self.width, self.height, win_w, win_h)
+        };
         self.canvas.clear();
         self.canvas.copy(texture, None, Some(dst))?;
         self.canvas.present();
@@ -214,6 +222,10 @@ impl Renderer {
                     keycode: Some(Keycode::F),
                     ..
                 } => self.toggle_fullscreen(),
+                Event::KeyDown {
+                    keycode: Some(Keycode::Z),
+                    ..
+                } => self.fill = !self.fill,
                 _ => {}
             }
         }
@@ -263,6 +275,25 @@ fn fit_centered(src_w: u32, src_h: u32, win_w: u32, win_h: u32) -> Rect {
     Rect::new(x, y, dst_w.max(1), dst_h.max(1))
 }
 
+/// Rectángulo destino que CUBRE la ventana (src llena win en ambos ejes,
+/// recortando el sobrante), preservando la proporción, centrado. El recorte lo
+/// hace SDL al clipear el rect contra la ventana.
+fn fill_centered(src_w: u32, src_h: u32, win_w: u32, win_h: u32) -> Rect {
+    if src_w == 0 || src_h == 0 {
+        return Rect::new(0, 0, win_w.max(1), win_h.max(1));
+    }
+    // Cubrir = la escala mayor; clava el eje que primero llenaría y deja el otro
+    // sobresalir (se recorta). Un solo truncado para proporción consistente.
+    let (dst_w, dst_h) = if win_w as u64 * src_h as u64 >= win_h as u64 * src_w as u64 {
+        (win_w, (win_w as u64 * src_h as u64 / src_w as u64) as u32)
+    } else {
+        ((win_h as u64 * src_w as u64 / src_h as u64) as u32, win_h)
+    };
+    let x = (win_w as i32 - dst_w as i32) / 2;
+    let y = (win_h as i32 - dst_h as i32) / 2;
+    Rect::new(x, y, dst_w.max(1), dst_h.max(1))
+}
+
 fn scaled_window(width: u32, height: u32) -> (u32, u32) {
     if height <= DEFAULT_WINDOW_HEIGHT {
         return (width.max(1), height.max(1));
@@ -296,5 +327,20 @@ mod tests {
     fn dimensiones_cero_no_paniquean() {
         let r = fit_centered(0, 0, 800, 600);
         assert_eq!((r.width(), r.height()), (800, 600));
+    }
+
+    #[test]
+    fn fill_cubre_y_recorta() {
+        // video más ancho que la ventana -> llena el alto, sobresale y recorta los lados.
+        let r = super::fill_centered(2400, 1108, 2560, 1440);
+        assert_eq!(r.height(), 1440);
+        assert!(r.width() > 2560);
+        assert!(r.x() < 0);
+    }
+
+    #[test]
+    fn fill_aspecto_exacto_sin_recorte() {
+        let r = super::fill_centered(1600, 900, 3200, 1800);
+        assert_eq!((r.width(), r.height()), (3200, 1800));
     }
 }
