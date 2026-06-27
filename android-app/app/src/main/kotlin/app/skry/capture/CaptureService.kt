@@ -141,7 +141,8 @@ class CaptureService : Service() {
         val mp = projection ?: return
         socket.use { s ->
             runCatching { s.tcpNoDelay = true }
-            val streamType = s.getInputStream().read()
+            val input = s.getInputStream()
+            val streamType = input.read()
             if (streamType != SkryProtocol.STREAM_VIDEO) {
                 Log.w(TAG, "tipo de stream inesperado: $streamType")
                 return
@@ -151,6 +152,23 @@ class CaptureService : Service() {
             SkryProtocol.writeHandshake(out, SkryProtocol.CODEC_H265, width, height, Build.MODEL)
             Log.i(TAG, "cliente conectado; captura ${width}x$height")
 
+            // Detección de cliente muerto: con la pantalla quieta el encoder no emite
+            // frames, así que un fallo de escritura nunca llega y un cliente caído
+            // bloquearía el servidor para siempre (handleClient no retornaría y no se
+            // aceptarían nuevos clientes). Este hilo lee del socket —el cliente no
+            // manda nada tras el byte de tipo— para que read() devuelva -1 o tire al
+            // desconectarse, y cortamos al instante aunque no haya frames en vuelo.
+            val clientAlive = AtomicBoolean(true)
+            val liveness = Thread({
+                try {
+                    while (running && input.read() >= 0) { /* el cliente no envía datos */ }
+                } catch (_: Exception) {
+                    // socket cerrado o caído: se refleja en clientAlive abajo
+                } finally {
+                    clientAlive.set(false)
+                }
+            }, "skry-liveness").apply { isDaemon = true; start() }
+
             val encoder = ScreenEncoder(mp, width, height, dpi)
             try {
                 encoder.start()
@@ -158,12 +176,18 @@ class CaptureService : Service() {
                     onFrame = { pts, frameFlags, payload, len ->
                         SkryProtocol.writeFrame(out, pts, frameFlags, payload, len)
                     },
-                    shouldStop = { !running || s.isClosed },
+                    shouldStop = { !running || s.isClosed || !clientAlive.get() },
                 )
             } catch (e: Exception) {
                 Log.i(TAG, "cliente desconectado: ${e.message}")
             } finally {
                 encoder.release()
+                // Desbloquear el read() del liveness y esperarlo brevemente.
+                runCatching { s.shutdownInput() }
+                liveness.join(LIVENESS_JOIN_MS)
+                if (liveness.isAlive) {
+                    Log.w(TAG, "el hilo liveness no terminó en ${LIVENESS_JOIN_MS}ms")
+                }
             }
         }
     }
@@ -261,6 +285,7 @@ class CaptureService : Service() {
         // aspecto respecto al nativo y mete barras de letterbox en los bordes.
         private const val MAX_DIMENSION = 4096
         private const val JOIN_TIMEOUT_MS = 1500L
+        private const val LIVENESS_JOIN_MS = 500L
 
         const val ACTION_STOP = "app.skry.action.STOP"
         const val EXTRA_RESULT_CODE = "result_code"
