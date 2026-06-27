@@ -198,6 +198,7 @@ public final class Spike3Main {
         // el launch tiran excepción, el finally igual libera el codec (y el display
         // si llegó a crearse). Así nada queda colgado consumiendo batería.
         Object vd = null;
+        boolean screenOff = false;
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         long frames = 0;
         try {
@@ -213,6 +214,10 @@ public final class Spike3Main {
                 } else {
                     DisplayLauncher.launchHome(ctx, displayId);
                 }
+                // El stream sale de la pantalla virtual, no del panel: apagar el
+                // panel ahorra mucha batería sin afectar el video. Se restaura al
+                // terminar la sesión.
+                screenOff = ScreenPower.turnOff();
             } else {
                 vd = createMirrorDisplay("skry-spike3", width, height, inputSurface);
             }
@@ -248,6 +253,9 @@ public final class Spike3Main {
         } catch (java.io.IOException e) {
             log("Cliente desconectado (" + e.getMessage() + "). Frames enviados: " + frames);
         } finally {
+            if (screenOff) {
+                ScreenPower.restore();
+            }
             releaseDisplay(vd);
             codec.stop();
             codec.release();
