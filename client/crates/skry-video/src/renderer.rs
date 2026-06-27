@@ -7,15 +7,21 @@
 //! este módulo habilita `unsafe_code`, que el workspace deja en `warn`.
 #![allow(unsafe_code)]
 
+use std::time::{Duration, Instant};
+
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::frame::Video;
-use sdl2::event::Event;
+use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::MouseButton;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
 use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::video::{FullscreenType, Window, WindowContext};
+use sdl2::Sdl;
+
+/// Tras este tiempo sin mover el mouse, se esconde el puntero (como YouTube).
+const CURSOR_IDLE_HIDE: Duration = Duration::from_millis(2500);
 
 /// Alto máximo por defecto de la ventana (la pantalla del teléfono es vertical).
 const DEFAULT_WINDOW_HEIGHT: u32 = 900;
@@ -39,6 +45,9 @@ pub struct Renderer {
     height: u32,
     // true = llenar la ventana recortando el sobrante; false = entrar entero con barras.
     fill: bool,
+    sdl: Sdl,
+    cursor_visible: bool,
+    last_mouse_activity: Instant,
     event_pump: sdl2::EventPump,
 }
 
@@ -118,7 +127,7 @@ impl Renderer {
 
         eprintln!(
             "[skry] controles: F o doble-click = pantalla completa | Esc = salir de \
-             pantalla completa | Z = llenar/entero | Q = salir"
+             pantalla completa (o cerrar) | Z = llenar/entero | Q = salir"
         );
 
         let event_pump = sdl.event_pump()?;
@@ -131,6 +140,9 @@ impl Renderer {
             width,
             height,
             fill,
+            sdl,
+            cursor_visible: true,
+            last_mouse_activity: Instant::now(),
             event_pump,
         })
     }
@@ -217,6 +229,33 @@ impl Renderer {
         // Colectar primero: el iterador de poll_iter mantiene prestado
         // `event_pump`, y procesar abajo necesita `&mut self` (toggle_fullscreen).
         let events: Vec<Event> = self.event_pump.poll_iter().collect();
+
+        // Actividad del mouse: reaparecer el puntero al moverlo/clickear. También
+        // al recuperar el foco de la ventana, para no dejarlo oculto al volver.
+        let mouse_active = events.iter().any(|e| {
+            matches!(
+                e,
+                Event::MouseMotion { .. }
+                    | Event::MouseButtonDown { .. }
+                    | Event::MouseWheel { .. }
+                    | Event::Window {
+                        win_event: WindowEvent::FocusGained,
+                        ..
+                    }
+            )
+        });
+        if mouse_active {
+            self.last_mouse_activity = Instant::now();
+            if !self.cursor_visible {
+                self.sdl.mouse().show_cursor(true);
+                self.cursor_visible = true;
+            }
+        } else if self.cursor_visible && self.last_mouse_activity.elapsed() >= CURSOR_IDLE_HIDE {
+            // Sin movimiento un rato: esconder el puntero (como YouTube).
+            self.sdl.mouse().show_cursor(false);
+            self.cursor_visible = false;
+        }
+
         for event in events {
             match event {
                 Event::Quit { .. }
@@ -374,5 +413,16 @@ mod tests {
     fn fill_aspecto_exacto_sin_recorte() {
         let r = super::fill_centered(1600, 900, 3200, 1800);
         assert_eq!((r.width(), r.height()), (3200, 1800));
+    }
+
+    #[test]
+    fn fill_telefono_vertical_en_monitor_ancho_recorta_arriba_abajo() {
+        // 1080x1920 (vertical) en 1920x1080 (ancho): llena el ancho, sobresale en
+        // alto -> se recorta arriba/abajo, centrado.
+        let r = super::fill_centered(1080, 1920, 1920, 1080);
+        assert_eq!(r.width(), 1920);
+        assert!(r.height() > 1080);
+        assert!(r.y() < 0);
+        assert_eq!(r.x(), 0);
     }
 }
