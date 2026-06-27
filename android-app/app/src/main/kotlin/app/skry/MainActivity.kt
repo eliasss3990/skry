@@ -47,15 +47,11 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -169,9 +165,6 @@ private fun needsNotificationPermission(context: Context): Boolean {
         PackageManager.PERMISSION_GRANTED
 }
 
-/** Modos de captura. El espejo replica el panel; "aparte" usa una pantalla virtual. */
-private val MODES = listOf("Espejo", "Pantalla aparte")
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SkryApp(
@@ -181,8 +174,6 @@ fun SkryApp(
     onOpenUpdate: () -> Unit,
     onToggle: () -> Unit,
 ) {
-    var mode by remember { mutableIntStateOf(0) }
-
     Scaffold(
         // "skry" en minúscula: es el nombre de marca, intencional.
         topBar = { CenterAlignedTopAppBar(title = { Text("skry") }) },
@@ -199,23 +190,6 @@ fun SkryApp(
             }
 
             StatusCard(capturing = capturing, serverAddress = serverAddress)
-
-            Text(
-                text = "Modo de captura",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                MODES.forEachIndexed { index, label ->
-                    SegmentedButton(
-                        selected = mode == index,
-                        onClick = { mode = index },
-                        shape = SegmentedButtonDefaults.itemShape(index, MODES.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
 
             Spacer(Modifier.weight(1f))
 
