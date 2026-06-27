@@ -174,6 +174,9 @@ jobs:
       - name: Construir imagen de build Android
         run: docker build -t skry-build-android:local -f build/android.Dockerfile .
 
+      - name: Tests unitarios de la app
+        run: scripts/android gradle :app:testDebugUnitTest
+
       - name: Build APK debug
         run: scripts/android gradle :app:assembleDebug
 
