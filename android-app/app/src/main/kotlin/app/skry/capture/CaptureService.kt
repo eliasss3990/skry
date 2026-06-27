@@ -9,6 +9,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.display.VirtualDisplay
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -58,6 +59,18 @@ class CaptureService : Service() {
     @Volatile
     private var nsd: NsdAdvertiser? = null
 
+    // La pantalla virtual se crea UNA vez por proyección y se reusa entre clientes
+    // (Android 14+ no permite más de una createVirtualDisplay por MediaProjection).
+    // Las dimensiones de captura quedan fijas al crearla.
+    @Volatile
+    private var virtualDisplay: VirtualDisplay? = null
+
+    @Volatile
+    private var captureWidth = 0
+
+    @Volatile
+    private var captureHeight = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -97,6 +110,34 @@ class CaptureService : Service() {
             }
         }, Handler(Looper.getMainLooper()))
         projection = mp
+
+        // Crear la pantalla virtual UNA sola vez (Android 14+ no permite más de una
+        // por proyección; el segundo intento rompía la captura entera). Se reusa
+        // entre clientes: cada uno engancha su propio codec con setSurface.
+        val (w, h, dpi) = decideCapture()
+        captureWidth = w
+        captureHeight = h
+        virtualDisplay = mp.createVirtualDisplay(
+            "skry",
+            w,
+            h,
+            dpi,
+            // Sin VIRTUAL_DISPLAY_FLAG_PUBLIC: una pantalla virtual pública se
+            // registra como pantalla secundaria del sistema (casi un monitor
+            // externo), y en One UI eso bloqueaba el descarte de notificaciones de
+            // otras apps mientras se transmitía. Privada captura igual; queda acotada
+            // a skry. La surface se asigna por cliente (arranca en null).
+            0,
+            null,
+            null,
+            null,
+        )
+        if (virtualDisplay == null) {
+            Log.e(TAG, "createVirtualDisplay devolvió null; detengo")
+            stopEverything()
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         running = true
         isRunning.set(true)
@@ -138,7 +179,7 @@ class CaptureService : Service() {
     }
 
     private fun handleClient(socket: Socket) {
-        val mp = projection ?: return
+        val vd = virtualDisplay ?: return
         socket.use { s ->
             runCatching { s.tcpNoDelay = true }
             val input = s.getInputStream()
@@ -147,7 +188,8 @@ class CaptureService : Service() {
                 Log.w(TAG, "tipo de stream inesperado: $streamType")
                 return
             }
-            val (width, height, dpi) = decideCapture()
+            val width = captureWidth
+            val height = captureHeight
             val out = DataOutputStream(BufferedOutputStream(s.getOutputStream()))
             SkryProtocol.writeHandshake(out, SkryProtocol.CODEC_H265, width, height, Build.MODEL)
             Log.i(TAG, "cliente conectado; captura ${width}x$height")
@@ -169,7 +211,7 @@ class CaptureService : Service() {
                 }
             }, "skry-liveness").apply { isDaemon = true; start() }
 
-            val encoder = ScreenEncoder(mp, width, height, dpi)
+            val encoder = ScreenEncoder(vd, width, height)
             try {
                 encoder.start()
                 encoder.drain(
@@ -260,8 +302,20 @@ class CaptureService : Service() {
         serverSocket = null
         // Esperar a que el hilo de captura termine (sale en <=100ms al ver running=false)
         // antes de soltar la projection, para no usarla ya detenida. Cota corta: no ANR.
-        acceptThread?.let { t -> runCatching { t.join(JOIN_TIMEOUT_MS) } }
+        val thread = acceptThread
         acceptThread = null
+        thread?.let { runCatching { it.join(JOIN_TIMEOUT_MS) } }
+        val stillRunning = thread?.isAlive == true
+        if (stillRunning) {
+            Log.w(TAG, "el hilo de captura no terminó en ${JOIN_TIMEOUT_MS}ms")
+        }
+        // Liberar la pantalla virtual SOLO si el encoder ya soltó su surface (hilo
+        // terminado). Si el hilo sigue vivo, liberarla acá sería un use-after-release
+        // nativo; projection.stop() la invalida igual abajo.
+        if (!stillRunning) {
+            runCatching { virtualDisplay?.release() }
+        }
+        virtualDisplay = null
         runCatching { projection?.stop() }
         projection = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

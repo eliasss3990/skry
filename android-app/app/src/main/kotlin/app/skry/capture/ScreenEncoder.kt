@@ -1,29 +1,28 @@
 package app.skry.capture
 
-import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.media.projection.MediaProjection
 import android.view.Surface
 import app.skry.net.SkryProtocol
 
 /**
- * Codifica la pantalla capturada por [MediaProjection] a H.265 por hardware, igual
- * que el spike validado en device: encoder con superficie de entrada + una pantalla
- * virtual que vuelca el contenido proyectado en esa superficie.
+ * Codec HEVC por hardware para UN cliente. NO crea la pantalla virtual: la recibe
+ * de [CaptureService] y le redirige la salida con `setSurface`.
  *
- * Un encoder por sesión de cliente (se crea al conectar, se libera al desconectar).
+ * Esto es clave en Android 14+: MediaProjection permite crear UNA sola
+ * VirtualDisplay por instancia. Crear una por cliente (lo que se hacía antes)
+ * rompía la proyección entera al conectar el segundo cliente. Ahora la pantalla
+ * se crea una vez en el servicio y se reusa entre clientes; cada cliente solo
+ * aporta su propio codec y lo engancha a la pantalla.
  */
 class ScreenEncoder(
-    private val projection: MediaProjection,
+    private val virtualDisplay: VirtualDisplay,
     private val width: Int,
     private val height: Int,
-    private val dpi: Int,
 ) {
     private var codec: MediaCodec? = null
-    private var virtualDisplay: VirtualDisplay? = null
     private var inputSurface: Surface? = null
 
     fun start() {
@@ -37,20 +36,12 @@ class ScreenEncoder(
         c.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         val surface = c.createInputSurface()
         c.start()
-        // Asignar los campos ANTES de crear el virtual display: si createVirtualDisplay
-        // tira, release() ya puede limpiar el codec y la surface (si no, fugarían).
+        // Asignar los campos ANTES de enganchar la pantalla: si algo falla después,
+        // release() puede limpiar el codec y la surface igual.
         codec = c
         inputSurface = surface
-        virtualDisplay = projection.createVirtualDisplay(
-            "skry",
-            width,
-            height,
-            dpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC,
-            surface,
-            null,
-            null,
-        )
+        // Redirigir el mirror de la proyección a este codec.
+        virtualDisplay.surface = surface
     }
 
     /**
@@ -92,11 +83,12 @@ class ScreenEncoder(
     }
 
     fun release() {
-        runCatching { virtualDisplay?.release() }
+        // Soltar la pantalla virtual de este codec ANTES de liberarlo: la pantalla
+        // la sigue siendo dueña el servicio y se reusa con el próximo cliente.
+        runCatching { virtualDisplay.surface = null }
         runCatching { codec?.stop() }
         runCatching { codec?.release() }
         runCatching { inputSurface?.release() }
-        virtualDisplay = null
         codec = null
         inputSurface = null
     }
