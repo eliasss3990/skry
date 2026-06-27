@@ -254,7 +254,12 @@ class CaptureService : Service() {
         private const val NOTIF_ID = 1
         /** Puerto TCP del servidor skry (lo usa el cliente con --connect IP:PUERTO). */
         const val PORT = 7345
-        private const val MAX_DIMENSION = 2400
+        // Captura a la resolución nativa del panel, igual que el spike validado en
+        // device (max-size 0). 4096 es un techo de seguridad para el decode del
+        // cliente, no un downscale real: ningún teléfono lo supera, así que en la
+        // práctica captura nativo. Bajarlo reintroduce el downscale, que cambia el
+        // aspecto respecto al nativo y mete barras de letterbox en los bordes.
+        private const val MAX_DIMENSION = 4096
         private const val JOIN_TIMEOUT_MS = 1500L
 
         const val ACTION_STOP = "app.skry.action.STOP"
