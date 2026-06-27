@@ -97,10 +97,10 @@ fn main() {
 
 fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     // Modo directo: la app del teléfono ya es el server (MediaProjection). Sólo
-    // conectamos por TCP; nada de adb, despliegue ni forward.
+    // conectamos por TCP; nada de adb, despliegue ni forward. Con reconexión: si
+    // el celu se cae un rato, reintenta solo hasta que vuelva (a prueba de cortes).
     if let Some(addr) = &cli.connect {
-        eprintln!("[skry] conectando a {addr}");
-        return mirror(addr, cli.fullscreen, cli.display, cli.no_vsync, cli.fill);
+        return connect_loop(addr, cli);
     }
 
     // Modo adb: desplegar y lanzar el server spike por app_process.
@@ -134,7 +134,33 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let _ = target.kill_server(&cli.main_class);
     let _ = target.remove_forward(&format!("tcp:{port}"));
 
-    result
+    // En modo adb una sola sesión: el motivo de fin (quit o stream) no importa.
+    result.map(|_| ())
+}
+
+/// Modo --connect: mantiene el espejo vivo a través de cortes. Si el stream se
+/// corta (el celu se durmió, blip de red), reconecta a la misma dirección; si no
+/// hay conexión, reintenta con backoff. Sólo termina cuando el usuario cierra.
+fn connect_loop(addr: &str, cli: &Cli) -> Result<(), Box<dyn Error>> {
+    const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
+    const MAX_BACKOFF: Duration = Duration::from_secs(5);
+    eprintln!("[skry] conectando a {addr}");
+    let mut backoff = INITIAL_BACKOFF;
+    loop {
+        match mirror(addr, cli.fullscreen, cli.display, cli.no_vsync, cli.fill) {
+            Ok(EndReason::UserQuit) => return Ok(()),
+            Ok(EndReason::StreamEnded) => {
+                eprintln!("[skry] stream cortado; reconectando a {addr}...");
+                backoff = INITIAL_BACKOFF;
+                thread::sleep(INITIAL_BACKOFF);
+            }
+            Err(e) => {
+                eprintln!("[skry] sin conexión ({e}); reintento en {:.1}s", backoff.as_secs_f32());
+                thread::sleep(backoff);
+                backoff = (backoff * 2).min(MAX_BACKOFF);
+            }
+        }
+    }
 }
 
 /// Valida que el tamaño venga como `ANCHOxALTO` con ambos enteros positivos.
@@ -193,13 +219,22 @@ fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 ///   ve a menor fps pero **en tiempo real** (nunca cámara lenta acumulada).
 ///
 /// Cada segundo reporta `decode fps` vs `present fps` para diagnosticar el límite.
+/// Por qué terminó una sesión de espejado: el usuario cerró la ventana, o el
+/// stream se cortó (server caído, red, el teléfono se durmió). En modo --connect
+/// el primer caso termina el programa y el segundo dispara una reconexión.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndReason {
+    UserQuit,
+    StreamEnded,
+}
+
 fn mirror(
     addr: &str,
     fullscreen: bool,
     display: Option<usize>,
     no_vsync: bool,
     fill: bool,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<EndReason, Box<dyn Error>> {
     let (stream, handshake) = connect_and_handshake(addr)?;
     eprintln!(
         "[skry] {} {}x{} codec={}",
@@ -277,14 +312,14 @@ fn mirror(
     // Hilo principal: presentar el último frame + eventos + reporte de fps.
     let mut present_fps = 0u64;
     let mut last_report = Instant::now();
-    loop {
+    let reason = loop {
         if !renderer.pump() {
-            break;
+            break EndReason::UserQuit;
         }
         // El decoder terminó (server caído, stream cerrado o error): salir en vez
         // de quedar congelado mostrando el último frame para siempre.
         if decoder.is_finished() {
-            break;
+            break EndReason::StreamEnded;
         }
         let frame = lock_recover(&latest).take();
         if let Some(decoded) = frame {
@@ -301,17 +336,17 @@ fn mirror(
             present_fps = 0;
             last_report = Instant::now();
         }
-    }
+    };
 
     // Desbloquear los hilos cerrando el socket y unirlos.
     let _ = stream.shutdown(Shutdown::Both);
     let _ = reader.join();
     match decoder.join() {
-        Ok(Ok(())) => Ok(()),
+        Ok(Ok(())) => Ok(reason),
         Ok(Err(e)) => Err(e.into()),
         Err(_) => {
             eprintln!("[skry] el hilo decoder paniqueó");
-            Ok(())
+            Ok(reason)
         }
     }
 }
