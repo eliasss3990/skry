@@ -39,28 +39,102 @@ public final class Spike3Main {
     // sólo agrega trabajo (decode + transferencias) sin calidad visible. 2400 es
     // el punto dulce medido: calidad casi full y ~100fps fluidos.
     private static final int DEFAULT_MAX_DIMENSION = 2400;
+    // Dimensiones por defecto de la pantalla virtual independiente (modo
+    // new-display): 16:9 apaisado, cómodo para ver contenido en la PC y liviano
+    // de decodificar.
+    private static final int DEFAULT_ND_WIDTH = 1600;
+    private static final int DEFAULT_ND_HEIGHT = 900;
+    // Densidad de la pantalla virtual independiente (dpi). Afecta el escalado de
+    // la UI de las apps lanzadas ahí; 320 es un mdpi/xhdpi razonable para teléfono.
+    private static final int ND_DENSITY_DPI = 320;
+
+    /** Opciones de arranque del server, parseadas de los args {@code clave=valor}. */
+    private static final class Options {
+        int maxDim = DEFAULT_MAX_DIMENSION;
+        boolean newDisplay = false;
+        int ndWidth = DEFAULT_ND_WIDTH;
+        int ndHeight = DEFAULT_ND_HEIGHT;
+        String app = null; // package a lanzar en el display independiente; null = home
+    }
 
     public static void main(String[] args) {
         log("==== skry Spike 3 (server por socket) ====");
-        int maxDim = DEFAULT_MAX_DIMENSION;
-        if (args.length > 0) {
-            try {
-                int parsed = Integer.parseInt(args[0]);
-                // 0 (o negativo) = sin límite -> panel completo.
-                maxDim = parsed <= 0 ? Integer.MAX_VALUE : parsed;
-            } catch (NumberFormatException e) {
-                log("max-size invalido '" + args[0] + "', uso " + DEFAULT_MAX_DIMENSION);
-            }
-        }
+        Options opts = parseOptions(args);
         try {
-            serve(maxDim);
+            serve(opts);
         } catch (Throwable t) {
             log("FALLO: " + t);
             t.printStackTrace();
         }
     }
 
-    private static void serve(int maxDim) throws Exception {
+    /**
+     * Parsea args {@code clave=valor} (orden libre). Compat: un arg suelto numérico
+     * se interpreta como max-size (formato viejo del cliente).
+     */
+    private static Options parseOptions(String[] args) {
+        Options o = new Options();
+        for (String arg : args) {
+            int eq = arg.indexOf('=');
+            if (eq < 0) {
+                // Compat con el formato viejo: un arg numérico suelto = max-size.
+                // Cualquier otra cosa sin '=' es un arg desconocido (no asumir).
+                if (arg.matches("-?\\d+")) {
+                    applyOption(o, "max-size", arg);
+                } else {
+                    log("arg desconocido '" + arg + "' ignorado");
+                }
+                continue;
+            }
+            applyOption(o, arg.substring(0, eq), arg.substring(eq + 1));
+        }
+        return o;
+    }
+
+    private static void applyOption(Options o, String key, String value) {
+        switch (key) {
+            case "max-size":
+                try {
+                    int parsed = Integer.parseInt(value);
+                    o.maxDim = parsed <= 0 ? Integer.MAX_VALUE : parsed; // 0 = sin límite
+                } catch (NumberFormatException e) {
+                    log("max-size invalido '" + value + "', uso " + DEFAULT_MAX_DIMENSION);
+                }
+                break;
+            case "new-display":
+                o.newDisplay = "1".equals(value) || "true".equalsIgnoreCase(value);
+                break;
+            case "nd-size":
+                int x = value.indexOf('x');
+                if (x > 0 && x < value.length() - 1) {
+                    try {
+                        int w = Integer.parseInt(value.substring(0, x));
+                        int h = Integer.parseInt(value.substring(x + 1));
+                        if (w > 0 && h > 0) {
+                            o.ndWidth = w;
+                            o.ndHeight = h;
+                        } else {
+                            log("nd-size con dimension <= 0 '" + value + "', uso "
+                                    + DEFAULT_ND_WIDTH + "x" + DEFAULT_ND_HEIGHT);
+                        }
+                    } catch (NumberFormatException e) {
+                        log("nd-size invalido '" + value + "', uso "
+                                + DEFAULT_ND_WIDTH + "x" + DEFAULT_ND_HEIGHT);
+                    }
+                } else {
+                    log("nd-size mal formado '" + value + "' (esperado ANCHOxALTO), uso "
+                            + DEFAULT_ND_WIDTH + "x" + DEFAULT_ND_HEIGHT);
+                }
+                break;
+            case "app":
+                o.app = value.isEmpty() ? null : value;
+                break;
+            default:
+                log("opcion desconocida '" + key + "' ignorada");
+        }
+    }
+
+    private static void serve(Options opts) throws Exception {
         log("Escuchando en localabstract:" + SOCKET_NAME + " ...");
         try (LocalServerSocket server = new LocalServerSocket(SOCKET_NAME);
              LocalSocket client = server.accept()) {
@@ -74,15 +148,23 @@ public final class Spike3Main {
                 return;
             }
 
-            // Escalar la captura para aliviar el decode (software) del cliente:
-            // un mirror a resolución reducida se decodifica mucho más rápido y,
-            // a igual bitrate, se ve mejor. El virtual display espeja la pantalla
-            // completa downscaleada a estas dimensiones.
-            int[] full = resolveDisplaySize();
-            int[] size = scaleDown(full[0], full[1], maxDim);
-            int width = size[0];
-            int height = size[1];
-            log("Display fisico " + full[0] + "x" + full[1] + " -> captura " + width + "x" + height);
+            int width;
+            int height;
+            if (opts.newDisplay) {
+                // Pantalla virtual INDEPENDIENTE: dimensiones elegidas por el cliente
+                // (no se deriva del panel físico). Pares (el encoder lo requiere).
+                width = opts.ndWidth & ~1;
+                height = opts.ndHeight & ~1;
+                log("Modo new-display: pantalla independiente " + width + "x" + height
+                        + (opts.app != null ? " app=" + opts.app : " (home)"));
+            } else {
+                // Mirror: escalar el panel físico para aliviar el decode del cliente.
+                int[] full = resolveDisplaySize();
+                int[] size = scaleDown(full[0], full[1], opts.maxDim);
+                width = size[0];
+                height = size[1];
+                log("Display fisico " + full[0] + "x" + full[1] + " -> captura " + width + "x" + height);
+            }
 
             DataOutputStream out = new DataOutputStream(client.getOutputStream());
             // 2) Handshake: magic + version + codec + w + h + deviceName.
@@ -96,12 +178,12 @@ public final class Spike3Main {
             log("Handshake enviado (" + width + "x" + height + ", " + Build.MODEL + ").");
 
             // 3) Encoder + virtual display y bombeo de frames al socket.
-            streamFrames(out, width, height);
+            streamFrames(out, width, height, opts);
         }
         log("Sesion terminada.");
     }
 
-    private static void streamFrames(DataOutputStream out, int width, int height) throws Exception {
+    private static void streamFrames(DataOutputStream out, int width, int height, Options opts) throws Exception {
         MediaCodec codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC);
         MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_HEVC, width, height);
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
@@ -112,12 +194,30 @@ public final class Spike3Main {
         Surface inputSurface = codec.createInputSurface();
         codec.start();
 
-        Object vd = createMirrorDisplay("skry-spike3", width, height, inputSurface);
-        log("Streaming. Cerra el cliente para terminar.");
-
+        // El display y el lanzamiento van DENTRO del try: si createIndependent o
+        // el launch tiran excepción, el finally igual libera el codec (y el display
+        // si llegó a crearse). Así nada queda colgado consumiendo batería.
+        Object vd = null;
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         long frames = 0;
         try {
+            if (opts.newDisplay) {
+                // Pantalla independiente + lanzar contenido EN ella (no en el panel físico).
+                ShellContext.init();
+                android.content.Context ctx = ShellContext.get();
+                vd = VirtualDisplayFactory.createIndependent(
+                        ctx, "skry-nd", width, height, ND_DENSITY_DPI, inputSurface);
+                int displayId = VirtualDisplayFactory.getDisplayId(vd);
+                if (opts.app != null) {
+                    DisplayLauncher.launchApp(ctx, displayId, opts.app);
+                } else {
+                    DisplayLauncher.launchHome(ctx, displayId);
+                }
+            } else {
+                vd = createMirrorDisplay("skry-spike3", width, height, inputSurface);
+            }
+            log("Streaming. Cerra el cliente para terminar.");
+
             // Hasta que el cliente cierre (la escritura al socket tira IOException).
             while (true) {
                 int idx = codec.dequeueOutputBuffer(info, 100_000);
@@ -191,6 +291,9 @@ public final class Spike3Main {
     }
 
     private static void releaseDisplay(Object virtualDisplay) {
+        if (virtualDisplay == null) {
+            return;
+        }
         try {
             virtualDisplay.getClass().getMethod("release").invoke(virtualDisplay);
         } catch (Throwable ignored) {

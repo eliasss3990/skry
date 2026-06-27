@@ -63,6 +63,22 @@ struct Cli {
     /// 2400 es el punto dulce medido: calidad casi full y ~100fps fluidos.
     #[arg(long, default_value_t = 2400)]
     max_size: u32,
+
+    /// Crear una pantalla virtual INDEPENDIENTE en el teléfono y transmitir ESA
+    /// (no el espejo del panel). El teléfono queda libre: lo que se muestre acá
+    /// sigue transmitiéndose a la PC aunque uses otra cosa en el celular.
+    #[arg(long)]
+    new_display: bool,
+
+    /// Tamaño de la pantalla independiente, `ANCHOxALTO` (sólo con --new-display).
+    /// Por defecto 1600x900 (16:9, cómodo para contenido).
+    #[arg(long, default_value = "1600x900", requires = "new_display", value_parser = parse_display_size)]
+    new_display_size: String,
+
+    /// Package de la app a abrir en la pantalla independiente (sólo con
+    /// --new-display). Si se omite, abre el launcher (home) del teléfono.
+    #[arg(long, requires = "new_display")]
+    app: Option<String>,
 }
 
 fn main() {
@@ -79,7 +95,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     eprintln!("[skry] dispositivo: {}", target.device().label());
 
     // Lanzar el server y reenviar su salida (a stderr) para diagnóstico.
-    let server_args = [cli.max_size.to_string()];
+    let server_args = build_server_args(cli);
     let mut child = target.spawn_app_process(&cli.server_jar, &cli.main_class, &server_args)?;
     forward_child_output("server", child.stdout.take());
     forward_child_output("server:err", child.stderr.take());
@@ -99,6 +115,34 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
     let _ = target.remove_forward(&format!("tcp:{port}"));
 
     result
+}
+
+/// Valida que el tamaño venga como `ANCHOxALTO` con ambos enteros positivos.
+/// Atrapa basura (`abc`, `1600`, `1600x`) en el cliente, con un mensaje claro,
+/// en vez de mandar un `nd-size` mal formado al server.
+fn parse_display_size(s: &str) -> Result<String, String> {
+    let bad = || format!("formato inválido '{s}': esperado ANCHOxALTO (ej. 1600x900)");
+    let (w, h) = s.split_once('x').ok_or_else(bad)?;
+    let w: u32 = w.parse().map_err(|_| bad())?;
+    let h: u32 = h.parse().map_err(|_| bad())?;
+    if w == 0 || h == 0 {
+        return Err(bad());
+    }
+    Ok(s.to_string())
+}
+
+/// Arma los args `clave=valor` que recibe el server. Mantiene `max-size` siempre
+/// y agrega las opciones de pantalla independiente sólo cuando se pidió.
+fn build_server_args(cli: &Cli) -> Vec<String> {
+    let mut args = vec![format!("max-size={}", cli.max_size)];
+    if cli.new_display {
+        args.push("new-display=1".to_string());
+        args.push(format!("nd-size={}", cli.new_display_size));
+        if let Some(app) = &cli.app {
+            args.push(format!("app={app}"));
+        }
+    }
+    args
 }
 
 /// Slot de un único frame: el decoder escribe el más nuevo (pisando el anterior)
@@ -288,4 +332,79 @@ fn try_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
     // pantalla; un timeout cortaría ante pantalla estática).
     stream.set_read_timeout(None)?;
     Ok((stream, handshake))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_size_valido() {
+        assert_eq!(parse_display_size("1600x900").unwrap(), "1600x900");
+        assert_eq!(parse_display_size("1x1").unwrap(), "1x1");
+    }
+
+    #[test]
+    fn display_size_invalido() {
+        for malo in [
+            "1600", "abc", "1600x", "x900", "0x900", "1600x0", "16x0x9", "",
+        ] {
+            assert!(
+                parse_display_size(malo).is_err(),
+                "deberia rechazar '{malo}'"
+            );
+        }
+    }
+
+    /// Parsea una CLI mínima válida y aplica overrides para no repetir flags.
+    fn cli_from(extra: &[&str]) -> Cli {
+        let mut argv = vec!["skry"];
+        argv.extend_from_slice(extra);
+        Cli::try_parse_from(argv).expect("CLI valida")
+    }
+
+    #[test]
+    fn server_args_mirror_solo_lleva_max_size() {
+        let args = build_server_args(&cli_from(&[]));
+        assert_eq!(args, vec!["max-size=2400".to_string()]);
+    }
+
+    #[test]
+    fn server_args_new_display_con_app() {
+        let args = build_server_args(&cli_from(&[
+            "--new-display",
+            "--new-display-size",
+            "1920x1080",
+            "--app",
+            "com.netflix.mediaclient",
+        ]));
+        assert_eq!(
+            args,
+            vec![
+                "max-size=2400".to_string(),
+                "new-display=1".to_string(),
+                "nd-size=1920x1080".to_string(),
+                "app=com.netflix.mediaclient".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn server_args_new_display_sin_app_es_home() {
+        let args = build_server_args(&cli_from(&["--new-display"]));
+        assert_eq!(
+            args,
+            vec![
+                "max-size=2400".to_string(),
+                "new-display=1".to_string(),
+                "nd-size=1600x900".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn app_sin_new_display_lo_rechaza_clap() {
+        // requires = "new_display": pasar --app sin --new-display es error de CLI.
+        assert!(Cli::try_parse_from(["skry", "--app", "com.foo"]).is_err());
+    }
 }
