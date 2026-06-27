@@ -79,6 +79,12 @@ struct Cli {
     /// --new-display). Si se omite, abre el launcher (home) del teléfono.
     #[arg(long, requires = "new_display")]
     app: Option<String>,
+
+    /// Conectar directo a la app skry del teléfono por TCP (`HOST:PUERTO`, ej.
+    /// `192.168.1.50:7345`), sin adb. La app captura con MediaProjection y se
+    /// anuncia por mDNS; este modo no despliega ni lanza nada por adb.
+    #[arg(long, conflicts_with_all = ["serial", "new_display", "server_jar", "main_class"])]
+    connect: Option<String>,
 }
 
 fn main() {
@@ -90,6 +96,14 @@ fn main() {
 }
 
 fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
+    // Modo directo: la app del teléfono ya es el server (MediaProjection). Sólo
+    // conectamos por TCP; nada de adb, despliegue ni forward.
+    if let Some(addr) = &cli.connect {
+        eprintln!("[skry] conectando a {addr}");
+        return mirror(addr, cli.fullscreen, cli.display, cli.no_vsync, cli.fill);
+    }
+
+    // Modo adb: desplegar y lanzar el server spike por app_process.
     let adb = Adb::new();
     let target = adb.resolve_target(cli.serial.as_deref())?;
     eprintln!("[skry] dispositivo: {}", target.device().label());
@@ -106,7 +120,13 @@ fn run(cli: &Cli) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("adb devolvió un puerto inválido: '{port_str}'"))?;
     eprintln!("[skry] forward tcp:{port} -> localabstract:skry");
 
-    let result = mirror(port, cli.fullscreen, cli.display, cli.no_vsync, cli.fill);
+    let result = mirror(
+        &format!("127.0.0.1:{port}"),
+        cli.fullscreen,
+        cli.display,
+        cli.no_vsync,
+        cli.fill,
+    );
 
     // Limpieza best-effort: cortar el adb shell local, matar el server remoto,
     // soltar el forward. No dejar el server huérfano consumiendo batería.
@@ -174,13 +194,13 @@ fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 ///
 /// Cada segundo reporta `decode fps` vs `present fps` para diagnosticar el límite.
 fn mirror(
-    port: u16,
+    addr: &str,
     fullscreen: bool,
     display: Option<usize>,
     no_vsync: bool,
     fill: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let (stream, handshake) = connect_and_handshake(port)?;
+    let (stream, handshake) = connect_and_handshake(addr)?;
     eprintln!(
         "[skry] {} {}x{} codec={}",
         handshake.device_name,
@@ -306,13 +326,14 @@ fn forward_child_output<R: Read + Send + 'static>(tag: &'static str, src: Option
     }
 }
 
-/// Conecta + handshake reintentando: adb acepta la conexión local aunque el
-/// server aún no escuche, así que el reintento abarca el handshake completo.
-fn connect_and_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
+/// Conecta + handshake reintentando: tanto adb (acepta la conexión local aunque
+/// el server aún no escuche) como la app remota pueden tardar en estar listos,
+/// así que el reintento abarca el handshake completo.
+fn connect_and_handshake(addr: &str) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_err: Option<Box<dyn Error>> = None;
     while Instant::now() < deadline {
-        match try_handshake(port) {
+        match try_handshake(addr) {
             Ok(pair) => return Ok(pair),
             Err(e) => {
                 last_err = Some(e);
@@ -323,8 +344,8 @@ fn connect_and_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Er
     Err(format!("el server no respondió el handshake en 10s: {last_err:?}").into())
 }
 
-fn try_handshake(port: u16) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+fn try_handshake(addr: &str) -> Result<(TcpStream, Handshake), Box<dyn Error>> {
+    let mut stream = TcpStream::connect(addr)?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     StreamType::Video.write(&mut stream)?;
     let handshake = Handshake::read(&mut stream)?;
@@ -406,5 +427,27 @@ mod tests {
     fn app_sin_new_display_lo_rechaza_clap() {
         // requires = "new_display": pasar --app sin --new-display es error de CLI.
         assert!(Cli::try_parse_from(["skry", "--app", "com.foo"]).is_err());
+    }
+
+    #[test]
+    fn connect_parsea_direccion() {
+        let cli = cli_from(&["--connect", "192.168.1.50:7345"]);
+        assert_eq!(cli.connect.as_deref(), Some("192.168.1.50:7345"));
+    }
+
+    #[test]
+    fn connect_conflictua_con_modo_adb() {
+        // --connect (app directa) no convive con flags del modo adb/spike.
+        for otro in [
+            ["--connect", "1.2.3.4:7345", "--new-display"].as_slice(),
+            ["--connect", "1.2.3.4:7345", "--serial", "abc123"].as_slice(),
+        ] {
+            let mut argv = vec!["skry"];
+            argv.extend_from_slice(otro);
+            assert!(
+                Cli::try_parse_from(argv).is_err(),
+                "deberia conflictuar: {otro:?}"
+            );
+        }
     }
 }
