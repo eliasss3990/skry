@@ -1,8 +1,22 @@
 package app.skry
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import app.skry.capture.CaptureService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,10 +67,73 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             SkryTheme {
-                SkryApp()
+                SkryRoot()
             }
         }
     }
+}
+
+/**
+ * Raíz que conecta la UI con el sistema: pide el permiso de captura
+ * (MediaProjection) y arranca/detiene el [CaptureService]. En Android 13+ pide
+ * antes el permiso de notificaciones (la captura corre en foreground service).
+ */
+@Composable
+private fun SkryRoot() {
+    val context = LocalContext.current
+    var capturing by rememberSaveable { mutableStateOf(false) }
+
+    val projectionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            val svc = Intent(context, CaptureService::class.java).apply {
+                putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(CaptureService.EXTRA_DATA, data)
+            }
+            ContextCompat.startForegroundService(context, svc)
+            capturing = true
+        }
+    }
+
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        // Con o sin permiso de notificaciones seguimos: la notificación es
+        // deseable pero no bloquea la captura.
+        requestProjection(context, projectionLauncher)
+    }
+
+    SkryApp(
+        capturing = capturing,
+        onToggle = {
+            if (capturing) {
+                context.startService(
+                    Intent(context, CaptureService::class.java).setAction(CaptureService.ACTION_STOP),
+                )
+                capturing = false
+            } else if (needsNotificationPermission(context)) {
+                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                requestProjection(context, projectionLauncher)
+            }
+        },
+    )
+}
+
+private fun requestProjection(
+    context: Context,
+    launcher: ActivityResultLauncher<Intent>,
+) {
+    val mpm = context.getSystemService(MediaProjectionManager::class.java)
+    launcher.launch(mpm.createScreenCaptureIntent())
+}
+
+private fun needsNotificationPermission(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+    return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED
 }
 
 /** Modos de captura. El espejo replica el panel; "aparte" usa una pantalla virtual. */
@@ -64,10 +141,7 @@ private val MODES = listOf("Espejo", "Pantalla aparte")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SkryApp() {
-    // Estado local de UI (placeholder). La lógica real (MediaProjection, servicio,
-    // descubrimiento) se conecta en fases siguientes.
-    var capturing by remember { mutableStateOf(false) }
+fun SkryApp(capturing: Boolean, onToggle: () -> Unit) {
     var mode by remember { mutableIntStateOf(0) }
     // TODO(fase update-check): conectar al chequeo de releases de GitHub.
     val updateAvailable by remember { mutableStateOf(false) }
@@ -108,7 +182,7 @@ fun SkryApp() {
 
             Spacer(Modifier.weight(1f))
 
-            CaptureButton(capturing = capturing, onToggle = { capturing = !capturing })
+            CaptureButton(capturing = capturing, onToggle = onToggle)
         }
     }
 }
@@ -227,6 +301,6 @@ private fun UpdateBanner() {
 @Composable
 private fun SkryAppPreview() {
     SkryTheme {
-        SkryApp()
+        SkryApp(capturing = false, onToggle = {})
     }
 }
